@@ -1,0 +1,104 @@
+@import "tailwindcss";
+
+/* ── MediKiosk Design Tokens ───────────────────────────────────────── */
+@layer base {
+  :root {
+    /* Primary palette — calm teal/blue healthcare */
+    --color-primary:   #0f6b8e;
+    --color-primary-light: #e0f2fe;
+    --color-primary-dark:  #0a4d66;
+
+    /* Accent — warm saffron for CTAs (accessible on dark bg) */
+    --color-accent:    #f59e0b;
+    --color-accent-light: #fef3c7;
+
+    /* Neutrals */
+    --color-surface:   #f0f9ff;
+    --color-card:      #ffffff;
+    --color-border:    #bae6fd;
+    --color-text:      #1e293b;
+    --color-muted:     #64748b;
+
+    /* Status */
+    --color-success:   #16a34a;
+    --color-danger:    #dc2626;
+    --color-warning:   #d97706;
+
+    /* Touch targets — minimum 64 px per WCAG / govt UX guidance */
+    --touch-min: 4rem;   /* 64 px */
+
+    /* Radius */
+    --radius-card: 1.25rem;
+    --radius-btn:  0.875rem;
+
+    /* Shadows */
+    --shadow-card: 0 4px 24px 0 rgba(15,107,142,0.10);
+    --shadow-btn:  0 2px 8px 0 rgba(15,107,142,0.20);
+
+    /* Font */
+    --font-body: 'Noto Sans', 'Noto Sans Devanagari', sans-serif;
+  }
+
+  html, body, #root {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    font-family: var(--font-body);
+    background-color: var(--color-surface);
+    color: var(--color-text);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    touch-action: manipulation; /* remove 300 ms tap delay */
+    user-select: none;          /* kiosk — prevent text selection */
+  }
+
+  /* Large, easy-to-read base font size for tablet/kiosk */
+  html { font-size: 18px; }
+}
+
+/* ── Utility classes used across screens ───────────────────────────── */
+@layer components {
+  /* Primary large button */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 font-semibold
+           rounded-[var(--radius-btn)] px-6 py-4
+           bg-[var(--color-primary)] text-white
+           shadow-[var(--shadow-btn)]
+           transition-transform duration-150 active:scale-95;
+    min-height: var(--touch-min);
+  }
+
+  /* Ghost / secondary button */
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 font-semibold
+           rounded-[var(--radius-btn)] px-6 py-4
+           border-2 border-[var(--color-primary)] text-[var(--color-primary)]
+           transition-transform duration-150 active:scale-95;
+    min-height: var(--touch-min);
+  }
+
+  /* Accent CTA button */
+  .btn-accent {
+    @apply inline-flex items-center justify-center gap-2 font-bold
+           rounded-[var(--radius-btn)] px-8 py-5 text-lg
+           bg-[var(--color-accent)] text-[var(--color-text)]
+           shadow-[var(--shadow-btn)]
+           transition-transform duration-150 active:scale-95;
+    min-height: var(--touch-min);
+  }
+
+  /* Card container */
+  .card {
+    @apply rounded-[var(--radius-card)] bg-[var(--color-card)]
+           shadow-[var(--shadow-card)] p-6;
+  }
+
+  /* Step indicator pill */
+  .step-pill {
+    @apply flex items-center justify-center w-10 h-10 rounded-full
+           font-bold text-sm;
+  }
+}
