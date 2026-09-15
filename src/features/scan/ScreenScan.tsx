@@ -158,13 +158,14 @@ export const ScreenScan: React.FC = () => {
 
       const docId = docRecord?.id || `doc-${Date.now()}`
 
-      // 3. Call digitize-document Edge Function / OCR model
+      // 3. Call digitize-document Edge Function / OCR model (with real image data)
       const structuredData = await processAndSaveOcr(
         docId,
         sessionId,
         storagePath,
         filename,
-        documents.length
+        documents.length,
+        file // Pass the actual image file for Gemini Vision OCR
       )
 
       // 4. Update UI document state

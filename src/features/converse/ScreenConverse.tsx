@@ -22,6 +22,7 @@ export const ScreenConverse: React.FC = () => {
     setCurrentSession,
     setScreenAudio,
     playAudio,
+    setIsRedFlagActive,
   } = useKiosk()
 
   // Conversation history
@@ -40,6 +41,14 @@ export const ScreenConverse: React.FC = () => {
     severity: 'critical' | 'high' | 'medium' | null
     recordId: string | null
   } | null>(null)
+
+  // Sync red flag state with KioskContext to hide Call-For-Help button during red flags
+  useEffect(() => {
+    setIsRedFlagActive(!!activeRedFlag)
+    return () => {
+      setIsRedFlagActive(false)
+    }
+  }, [activeRedFlag, setIsRedFlagActive])
 
   // Text input fallback state (allows typing if microphone is unsupported/noisy)
   const [manualText, setManualText] = useState<string>('')
@@ -148,18 +157,21 @@ export const ScreenConverse: React.FC = () => {
   }
 
   // Answer handler for both touch tap and voice input
+  // Answer handler for both touch tap and voice input
   const handleAnswer = async (
     answerText: string,
     source: 'voice' | 'touch' = 'touch',
     optionValue?: string
   ) => {
-    if (!currentTurn || !answerText.trim()) return
+    if (!currentTurn || !answerText.trim() || loadingNext) return
+    setLoadingNext(true)
 
-    // Stop listening if mic was active
-    if (isListening) {
-      speechRecognitionService.stop()
-      setIsListening(false)
-    }
+    // Cleanly stop listening and reset microphone
+    speechRecognitionService.stop()
+    setIsListening(false)
+    setLiveTranscript('')
+    setManualText('')
+    setShowManualInput(false)
 
     const newTurn: ConversationTurn = {
       field_key: currentTurn.field_key,
@@ -170,124 +182,110 @@ export const ScreenConverse: React.FC = () => {
 
     const updatedHistory = [...history, newTurn]
     setHistory(updatedHistory)
-    setLiveTranscript('')
-    setManualText('')
-    setShowManualInput(false)
 
-    // Save Q&A pair to Supabase history_responses table
-    const sessionId = currentSession?.id
-    if (sessionId) {
-      try {
-        await supabase.from('history_responses').insert({
-          session_id: sessionId,
-          field_key: currentTurn.field_key,
-          field_value_json: {
-            question: currentTurn.question,
-            question_localized: currentTurn.question_localized,
-            answer: answerText.trim(),
-            field_key: currentTurn.field_key,
-            option_value: optionValue || null,
-          },
-          source,
-          captured_at: new Date().toISOString(),
-        })
-      } catch (err) {
-        console.warn('Could not persist response to Supabase:', err)
-      }
-
-      // If this question is part of the AYUSH clinical inquiry, persist to ayush_history
-      if (currentTurn.field_key.startsWith('ayush_')) {
-        try {
-          const matchedOpt = currentTurn.options.find(
-            (o) =>
-              o.label === answerText ||
-              o.label_localized === answerText ||
-              o.value === answerText ||
-              o.value === optionValue
-          )
-          const optVal = optionValue || matchedOpt?.value || answerText
-
-          // Query existing row to preserve accumulated data across questions
-          const { data: existingAyush } = await supabase
-            .from('ayush_history')
-            .select('*')
-            .eq('session_id', sessionId)
-            .maybeSingle()
-
-          const ayushPayload: Record<string, any> = {
-            session_id: sessionId,
-            prakriti_json: existingAyush?.prakriti_json || {},
-            vikriti_json: existingAyush?.vikriti_json || {},
-            agni: existingAyush?.agni || null,
-            koshtha: existingAyush?.koshtha || null,
-            ahara_vihara_json: existingAyush?.ahara_vihara_json || {},
-            updated_at: new Date().toISOString(),
-          }
-
-          if (currentTurn.field_key === 'ayush_prakriti') {
-            ayushPayload.prakriti_json = {
-              constitution: optVal,
-              answer: answerText.trim(),
-              option_label: matchedOpt?.label || null,
-              option_label_localized: matchedOpt?.label_localized || null,
-              captured_at: new Date().toISOString(),
-            }
-          } else if (currentTurn.field_key === 'ayush_vikriti') {
-            ayushPayload.vikriti_json = {
-              imbalance: optVal,
-              answer: answerText.trim(),
-              option_label: matchedOpt?.label || null,
-              option_label_localized: matchedOpt?.label_localized || null,
-              captured_at: new Date().toISOString(),
-            }
-          } else if (currentTurn.field_key === 'ayush_agni') {
-            ayushPayload.agni = optVal
-          } else if (currentTurn.field_key === 'ayush_koshtha') {
-            ayushPayload.koshtha = optVal
-          } else if (currentTurn.field_key === 'ayush_ahara_vihara') {
-            ayushPayload.ahara_vihara_json = {
-              diet_routine: optVal,
-              answer: answerText.trim(),
-              option_label: matchedOpt?.label || null,
-              option_label_localized: matchedOpt?.label_localized || null,
-              captured_at: new Date().toISOString(),
-            }
-          }
-
-          const { error: ayushErr } = await supabase
-            .from('ayush_history')
-            .upsert(ayushPayload, { onConflict: 'session_id' })
-
-          if (ayushErr) {
-            console.error('Error updating ayush_history:', ayushErr)
-          } else {
-            console.log('Successfully saved to ayush_history:', currentTurn.field_key, optVal)
-          }
-        } catch (ayushCatchErr) {
-          console.error('Exception updating ayush_history:', ayushCatchErr)
-        }
-      }
+    // Hard completion check: exactly 7 questions max (or if already complete)
+    const isAyush = activeDepartment === 'ayush' || activeDepartment.includes('ayush')
+    const maxLimit = isAyush ? 6 : 7
+    if (
+      currentTurn.is_complete ||
+      currentTurn.field_key === 'interview_completed' ||
+      currentTurn.field_key === 'ready_for_scan' ||
+      updatedHistory.length >= maxLimit
+    ) {
+      await handleCompleteInterview()
+      return
     }
 
-    // Check if the answer itself triggers an immediate red flag (e.g. chest pain)
+    // Save Q&A pair to Supabase in the background (NON-BLOCKING: allows instant next question)
+    const sessionId = currentSession?.id
+    if (sessionId) {
+      ;(async () => {
+        try {
+          await supabase.from('history_responses').insert({
+            session_id: sessionId,
+            field_key: currentTurn.field_key,
+            field_value_json: {
+              question: currentTurn.question,
+              question_localized: currentTurn.question_localized,
+              answer: answerText.trim(),
+              field_key: currentTurn.field_key,
+              option_value: optionValue || null,
+            },
+            source,
+            captured_at: new Date().toISOString(),
+          })
+
+          if (currentTurn.field_key.startsWith('ayush_')) {
+            const matchedOpt = currentTurn.options.find(
+              (o) =>
+                o.label === answerText ||
+                o.label_localized === answerText ||
+                o.value === answerText ||
+                o.value === optionValue
+            )
+            const optVal = optionValue || matchedOpt?.value || answerText
+
+            const { data: existingAyush } = await supabase
+              .from('ayush_history')
+              .select('*')
+              .eq('session_id', sessionId)
+              .maybeSingle()
+
+            const ayushPayload: Record<string, any> = {
+              session_id: sessionId,
+              prakriti_json: existingAyush?.prakriti_json || {},
+              vikriti_json: existingAyush?.vikriti_json || {},
+              agni: existingAyush?.agni || null,
+              koshtha: existingAyush?.koshtha || null,
+              ahara_vihara_json: existingAyush?.ahara_vihara_json || {},
+              updated_at: new Date().toISOString(),
+            }
+
+            if (currentTurn.field_key === 'ayush_prakriti') {
+              ayushPayload.prakriti_json = {
+                constitution: optVal,
+                answer: answerText.trim(),
+                captured_at: new Date().toISOString(),
+              }
+            } else if (currentTurn.field_key === 'ayush_vikriti') {
+              ayushPayload.vikriti_json = {
+                imbalance: optVal,
+                answer: answerText.trim(),
+                captured_at: new Date().toISOString(),
+              }
+            } else if (currentTurn.field_key === 'ayush_agni') {
+              ayushPayload.agni = optVal
+            } else if (currentTurn.field_key === 'ayush_koshtha') {
+              ayushPayload.koshtha = optVal
+            } else if (currentTurn.field_key === 'ayush_ahara_vihara') {
+              ayushPayload.ahara_vihara_json = {
+                diet_routine: optVal,
+                answer: answerText.trim(),
+                captured_at: new Date().toISOString(),
+              }
+            }
+
+            await supabase.from('ayush_history').upsert(ayushPayload, { onConflict: 'session_id' })
+          }
+        } catch (bgErr) {
+          console.warn('Background response persist error:', bgErr)
+        }
+      })()
+    }
+
+    // Check if the answer triggers an immediate red flag
     const lowerAns = answerText.toLowerCase()
     if (
       (lowerAns.includes('chest') || lowerAns.includes('सीने') || lowerAns.includes('छाती')) &&
       (lowerAns.includes('breath') || lowerAns.includes('सांस') || lowerAns.includes('severe') || lowerAns.includes('दर्द'))
     ) {
-      await handleTriggerRedFlag(
+      handleTriggerRedFlag(
         'Severe chest pain with respiratory discomfort reported',
         'critical'
-      )
+      ).catch(console.warn)
     }
 
-    // Check if interview is complete
-    if (currentTurn.is_complete) {
-      await handleCompleteInterview()
-      return
-    }
-
-    // Fetch next question in the SOCRATES / HPI decision tree
+    // Advance immediately to next question
     await fetchQuestion(updatedHistory)
   }
 
@@ -317,13 +315,14 @@ export const ScreenConverse: React.FC = () => {
     navigate('/scan')
   }
 
-  // Microphone toggle (Web Speech API ASR)
+  // Microphone toggle (Speech Recognition ASR)
   const toggleMicrophone = () => {
     if (isListening) {
       speechRecognitionService.stop()
       setIsListening(false)
-      if (liveTranscript.trim()) {
-        handleAnswer(liveTranscript, 'voice')
+      const cleanText = liveTranscript.replace(/^[🎤⏳].*?\.\.\.?\s*/, '').trim()
+      if (cleanText.length > 1) {
+        handleAnswer(cleanText, 'voice')
       }
       return
     }
@@ -347,16 +346,22 @@ export const ScreenConverse: React.FC = () => {
     const started = speechRecognitionService.start(speechLang, {
       onTranscript: (text, isFinal) => {
         setLiveTranscript(text)
-        if (isFinal && text.trim().length > 2) {
-          // Auto submit on final clear speech
+        const isStatusMsg = text.startsWith('🎤') || text.startsWith('⏳')
+        if (!isStatusMsg && text.trim().length > 0) {
+          setManualText(text)
+        }
+
+        if (isFinal && !isStatusMsg && text.trim().length > 1) {
+          // Auto submit on final clear speech after brief pause
           setTimeout(() => {
             handleAnswer(text, 'voice')
-          }, 600)
+          }, 800)
         }
       },
       onError: (err) => {
         setSpeechError(err)
         setIsListening(false)
+        setShowManualInput(true)
       },
       onEnd: () => {
         setIsListening(false)
@@ -482,9 +487,14 @@ export const ScreenConverse: React.FC = () => {
               <button
                 key={idx}
                 id={`btn-opt-answer-${idx}`}
+                disabled={loadingNext}
                 onClick={() => handleAnswer(opt.label_localized || opt.label, 'touch', opt.value)}
                 type="button"
-                className="group flex items-center justify-between p-4 sm:p-5 rounded-2xl bg-white border-2 border-teal-200 hover:border-teal-600 hover:bg-teal-50/60 active:scale-98 shadow-xs hover:shadow-md transition-all duration-150 text-left cursor-pointer min-h-[64px]"
+                className={`group flex items-center justify-between p-4 sm:p-5 rounded-2xl bg-white border-2 transition-all duration-150 text-left min-h-[64px] ${
+                  loadingNext
+                    ? 'opacity-60 cursor-not-allowed border-slate-200'
+                    : 'border-teal-200 hover:border-teal-600 hover:bg-teal-50/60 active:scale-98 shadow-xs hover:shadow-md cursor-pointer'
+                }`}
               >
                 <span className="text-lg sm:text-xl font-bold text-slate-900 group-hover:text-teal-950">
                   {opt.label_localized || opt.label}
@@ -500,12 +510,15 @@ export const ScreenConverse: React.FC = () => {
               <div className="relative mb-3">
                 <button
                   id="btn-voice-mic"
+                  disabled={loadingNext}
                   onClick={toggleMicrophone}
                   type="button"
-                  className={`w-20 h-20 sm:w-24 sm:h-24 rounded-full flex items-center justify-center text-4xl shadow-xl transition-transform active:scale-95 cursor-pointer ${
-                    isListening
-                      ? 'bg-red-600 text-white ring-8 ring-red-200 animate-pulse'
-                      : 'bg-teal-700 hover:bg-teal-800 text-white ring-4 ring-teal-100'
+                  className={`w-20 h-20 sm:w-24 sm:h-24 rounded-full flex items-center justify-center text-4xl shadow-xl transition-transform active:scale-95 ${
+                    loadingNext
+                      ? 'opacity-50 cursor-not-allowed bg-slate-400'
+                      : isListening
+                      ? 'bg-red-600 text-white ring-8 ring-red-200 animate-pulse cursor-pointer'
+                      : 'bg-teal-700 hover:bg-teal-800 text-white ring-4 ring-teal-100 cursor-pointer'
                   }`}
                   aria-label="Toggle Microphone"
                   title="Speak your answer"

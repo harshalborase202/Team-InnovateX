@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
+import { useKiosk } from '../../context/KioskContext'
 import {
   registerPatient,
   loginPatient,
@@ -14,6 +15,7 @@ import {
 } from '../../services/patientAuthService'
 
 export function ScreenPatientDashboard() {
+  const { t, language, setScreenAudio, replayAudio, isSpeaking, setIsSettingsOpen } = useKiosk()
   // ── Auth State ──
   const [currentUser, setCurrentUser] = useState<any | null>(null)
   const [patientProfile, setPatientProfile] = useState<any | null>(null)
@@ -72,6 +74,15 @@ export function ScreenPatientDashboard() {
     }
     checkAuth()
   }, [])
+
+  // Accessibility screen audio announcement
+  useEffect(() => {
+    const patientAudio =
+      language === 'hi'
+        ? 'मरीज़ स्वास्थ्य खाता पोर्टल। अपने पिछले ओपीडी परामर्श, डिजिटल पर्चे और स्वास्थ्य सारांश यहाँ देखें।'
+        : 'Patient Health Portal. View your previous OPD consultations, digital prescriptions, and clinical summaries.'
+    setScreenAudio(patientAudio)
+  }, [language, setScreenAudio])
 
   // Load sessions for logged in user
   async function loadSessions() {
@@ -291,12 +302,43 @@ export function ScreenPatientDashboard() {
               <p className="text-xs font-semibold text-slate-500">MediKiosk Digital Health Records</p>
             </div>
           </div>
-          <Link
-            to="/"
-            className="text-sm font-bold text-[#0f6b8e] hover:underline flex items-center gap-1.5 px-4 py-2 rounded-lg bg-sky-50 border border-sky-200"
-          >
-            ← अस्पताल कियोस्क (Hospital Kiosk)
-          </Link>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <button
+              id="btn-patient-login-replay-audio"
+              onClick={replayAudio}
+              type="button"
+              className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer min-h-[48px] min-w-[48px] ${
+                isSpeaking
+                  ? 'bg-amber-400 text-amber-950 border-amber-500 animate-pulse'
+                  : 'bg-sky-50 text-teal-800 border-sky-200 hover:bg-sky-100'
+              }`}
+              aria-label={t('repeatAudio')}
+              title={t('repeatAudio')}
+            >
+              <span role="img" aria-hidden="true">{isSpeaking ? '🔊' : '🔈'}</span>
+              <span className="hidden sm:inline">{isSpeaking ? t('speakingNow') : t('repeatAudio')}</span>
+            </button>
+
+            {/* Sugamyata / Accessibility Settings Button */}
+            <button
+              id="btn-patient-login-settings"
+              onClick={() => setIsSettingsOpen(true)}
+              type="button"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-extrabold bg-white hover:bg-teal-50 text-teal-900 border-2 border-teal-600 cursor-pointer min-h-[48px] shadow-xs active:scale-95"
+              aria-label={t('openSettings')}
+              title={t('openSettings')}
+            >
+              <span className="text-base" role="img" aria-hidden="true">⚙️</span>
+              <span className="font-extrabold">{t('settings')}</span>
+            </button>
+
+            <Link
+              to="/"
+              className="text-sm font-bold text-[#0f6b8e] hover:underline flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-sky-50 border border-sky-200 min-h-[48px]"
+            >
+              ← अस्पताल कियोस्क (Hospital Kiosk)
+            </Link>
+          </div>
         </header>
 
         {/* Main Content Area */}
@@ -598,10 +640,39 @@ export function ScreenPatientDashboard() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <button
+              id="btn-patient-dash-replay-audio"
+              onClick={replayAudio}
+              type="button"
+              className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer min-h-[48px] min-w-[48px] ${
+                isSpeaking
+                  ? 'bg-amber-400 text-amber-950 border-amber-500 animate-pulse'
+                  : 'bg-teal-50 text-teal-800 border-teal-200 hover:bg-teal-100'
+              }`}
+              aria-label={t('repeatAudio')}
+              title={t('repeatAudio')}
+            >
+              <span role="img" aria-hidden="true">{isSpeaking ? '🔊' : '🔈'}</span>
+              <span className="hidden sm:inline">{isSpeaking ? t('speakingNow') : t('repeatAudio')}</span>
+            </button>
+
+            {/* Sugamyata / Accessibility Settings Button */}
+            <button
+              id="btn-patient-dash-settings"
+              onClick={() => setIsSettingsOpen(true)}
+              type="button"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-extrabold bg-white hover:bg-teal-50 text-teal-900 border-2 border-teal-600 cursor-pointer min-h-[48px] shadow-xs active:scale-95"
+              aria-label={t('openSettings')}
+              title={t('openSettings')}
+            >
+              <span className="text-base" role="img" aria-hidden="true">⚙️</span>
+              <span className="font-extrabold">{t('settings')}</span>
+            </button>
+
             <Link
               to="/"
-              className="text-xs font-bold text-slate-600 hover:text-slate-900 px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200"
+              className="text-xs font-bold text-slate-600 hover:text-slate-900 px-3 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 min-h-[48px] flex items-center"
             >
               कियोस्क मोड (Kiosk)
             </Link>
@@ -609,7 +680,7 @@ export function ScreenPatientDashboard() {
               type="button"
               onClick={handleLogout}
               id="btn-logout"
-              className="text-xs font-bold text-red-600 hover:text-red-700 px-3 py-2 rounded-lg bg-red-50 hover:bg-red-100 border border-red-200 transition-colors"
+              className="text-xs font-bold text-red-600 hover:text-red-700 px-3 py-2.5 rounded-xl bg-red-50 hover:bg-red-100 border border-red-200 transition-colors min-h-[48px] flex items-center cursor-pointer"
             >
               लॉग आउट (Sign Out)
             </button>

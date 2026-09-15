@@ -5,10 +5,14 @@ import { ScreenScan } from './features/scan/ScreenScan'
 import { ScreenSummary } from './features/summary/ScreenSummary'
 import { ScreenClinician } from './features/clinician/ScreenClinician'
 import { ScreenPatientDashboard } from './features/patient/ScreenPatientDashboard'
+import { PersistentAccessibilityControls } from './components/PersistentAccessibilityControls'
 
 export default function App() {
   return (
     <BrowserRouter>
+      {/* Persistent accessibility settings, repeat audio, and call-for-help */}
+      <PersistentAccessibilityControls />
+
       <Routes>
         {/* Patient journey */}
         <Route path="/" element={<IdentifyFlow />} />

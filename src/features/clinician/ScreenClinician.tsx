@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
+import { useKiosk } from '../../context/KioskContext'
 import {
   getSessionSummary,
   savePhysicianSummaryEdit,
@@ -20,6 +21,7 @@ interface SessionItem {
 export const ScreenClinician: React.FC = () => {
   const { sessionId: paramSessionId } = useParams<{ sessionId?: string }>()
   const navigate = useNavigate()
+  const { t, language, setScreenAudio, replayAudio, isSpeaking, setIsSettingsOpen } = useKiosk()
 
   // Authentication State
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
@@ -73,6 +75,15 @@ export const ScreenClinician: React.FC = () => {
       loadSessions()
     }
   }, [isAuthenticated, loadSessions])
+
+  // Accessibility screen audio announcement
+  useEffect(() => {
+    const clinicianPrompt =
+      language === 'hi'
+        ? 'डॉक्टर परामर्श पोर्टल। मरीज़ों की सूची से टोकन चुनें और तैयार नैदानिक सारांश व पर्चे देखें।'
+        : 'Doctor consultation portal. Select a patient session from the queue to review clinical summary and scanned documents.'
+    setScreenAudio(clinicianPrompt)
+  }, [language, setScreenAudio])
 
   // 2. Fetch clinical summary & scanned documents when selectedSessionId changes
   const loadSessionDetails = useCallback(async (sessId: string) => {
@@ -195,17 +206,48 @@ export const ScreenClinician: React.FC = () => {
   // ── 1. LOGIN SCREEN ────────────────────────────────────────────────
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-900 text-slate-100 p-4">
-        <div className="w-full max-w-md bg-slate-800 border-2 border-slate-700 rounded-3xl p-8 shadow-2xl">
-          <div className="flex items-center gap-3 mb-6 pb-4 border-b border-slate-700">
-            <div className="w-12 h-12 rounded-2xl bg-teal-600 text-white flex items-center justify-center text-2xl font-bold">
-              🩺
-            </div>
-            <div>
-              <h2 className="text-2xl font-extrabold text-white">Clinician Portal</h2>
-              <p className="text-xs text-slate-400">Hospital OPD Physician Dashboard</p>
-            </div>
+      <div className="min-h-screen flex flex-col bg-slate-900 text-slate-100">
+        {/* Clinician Login Top Header */}
+        <header className="w-full bg-slate-800/90 border-b border-slate-700 px-4 sm:px-8 py-3 flex items-center justify-between sticky top-0 z-30">
+          <div className="flex items-center gap-2.5">
+            <span className="text-xl">🩺</span>
+            <span className="font-extrabold text-sm sm:text-base text-white tracking-tight">
+              MediKiosk EHR • Clinician Portal
+            </span>
           </div>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <button
+              id="btn-clinician-login-settings"
+              onClick={() => setIsSettingsOpen(true)}
+              type="button"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-extrabold bg-slate-700 hover:bg-slate-600 text-teal-300 border border-teal-500 cursor-pointer min-h-[44px] shadow-xs active:scale-95"
+              aria-label={t('openSettings')}
+              title={t('openSettings')}
+            >
+              <span role="img" aria-hidden="true">⚙️</span>
+              <span className="font-extrabold">{t('settings')}</span>
+            </button>
+            <button
+              onClick={() => navigate('/')}
+              type="button"
+              className="text-xs font-bold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 px-3 py-2 rounded-xl border border-slate-600 cursor-pointer min-h-[44px]"
+            >
+              ← Patient Kiosk
+            </button>
+          </div>
+        </header>
+
+        <div className="flex-1 flex flex-col items-center justify-center p-4">
+          <div className="w-full max-w-md bg-slate-800 border-2 border-slate-700 rounded-3xl p-8 shadow-2xl">
+            <div className="flex items-center gap-3 mb-6 pb-4 border-b border-slate-700">
+              <div className="w-12 h-12 rounded-2xl bg-teal-600 text-white flex items-center justify-center text-2xl font-bold">
+                🩺
+              </div>
+              <div>
+                <h2 className="text-2xl font-extrabold text-white">Clinician Portal</h2>
+                <p className="text-xs text-slate-400">Hospital OPD Physician Dashboard</p>
+              </div>
+            </div>
 
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
@@ -270,6 +312,7 @@ export const ScreenClinician: React.FC = () => {
           </div>
         </div>
       </div>
+    </div>
     )
   }
 
@@ -299,17 +342,50 @@ export const ScreenClinician: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
+          <button
+            id="btn-clinician-replay-audio"
+            onClick={replayAudio}
+            type="button"
+            className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer min-h-[48px] min-w-[48px] ${
+              isSpeaking
+                ? 'bg-amber-400 text-amber-950 border-amber-500 animate-pulse'
+                : 'bg-teal-900/60 text-teal-200 border-teal-700 hover:bg-teal-800'
+            }`}
+            aria-label={t('repeatAudio')}
+            title={t('repeatAudio')}
+          >
+            <span role="img" aria-hidden="true">{isSpeaking ? '🔊' : '🔈'}</span>
+            <span className="hidden sm:inline">{isSpeaking ? t('speakingNow') : t('repeatAudio')}</span>
+          </button>
+
+          {/* Sugamyata / Accessibility Settings Button */}
+          <button
+            id="btn-clinician-settings"
+            onClick={() => setIsSettingsOpen(true)}
+            type="button"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-extrabold bg-slate-800 hover:bg-slate-700 text-teal-300 border border-teal-500 cursor-pointer min-h-[48px] shadow-xs active:scale-95"
+            aria-label={t('openSettings')}
+            title={t('openSettings')}
+          >
+            <span role="img" aria-hidden="true">⚙️</span>
+            <span className="font-extrabold">{t('settings')}</span>
+          </button>
+
           <button
             onClick={() => navigate('/')}
-            className="text-xs font-bold text-slate-300 hover:text-white bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700 cursor-pointer"
+            type="button"
+            className="text-xs font-bold text-slate-300 hover:text-white bg-slate-800 px-3 py-2 rounded-xl border border-slate-700 cursor-pointer min-h-[48px]"
+            aria-label="Return to patient kiosk"
           >
             ← Open Kiosk
           </button>
           <button
             id="btn-clinician-logout"
             onClick={handleLogout}
-            className="text-xs font-bold text-red-300 hover:text-red-100 bg-red-950/60 px-3 py-1.5 rounded-lg border border-red-800 cursor-pointer"
+            type="button"
+            className="text-xs font-bold text-red-300 hover:text-red-100 bg-red-950/60 px-3 py-2 rounded-xl border border-red-800 cursor-pointer min-h-[48px]"
+            aria-label="Log out of clinician portal"
           >
             Log Out
           </button>

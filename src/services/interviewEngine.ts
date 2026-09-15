@@ -1,5 +1,5 @@
-import { supabase } from '../lib/supabase'
 import { SupportedLanguage } from './translations'
+import { isGeminiConfigured, generateGeminiInterviewTurn } from './geminiClient'
 
 export interface ConversationTurn {
   field_key: string
@@ -33,30 +33,63 @@ export interface InterviewStepResponse {
 // Client-side clinical rule engine (exact parity with the Edge Function)
 // Ensures 100% kiosk resilience regardless of edge function deployment status
 export async function getNextInterviewQuestion(
-  sessionId: string,
+  _sessionId: string,
   history: ConversationTurn[],
   language: SupportedLanguage = 'hi',
   department: string = 'general_medicine'
 ): Promise<InterviewStepResponse> {
-  // Try remote Supabase Edge Function first
-  try {
-    const { data, error } = await supabase.functions.invoke('history-interview', {
-      body: {
-        session_id: sessionId,
-        history,
-        language,
-        department,
-      },
-    })
+  const isAyush = department === 'ayush' || department.includes('ayush')
+  const MAX_QUESTIONS = isAyush ? 6 : 7
 
-    if (!error && data && data.question) {
-      return data as InterviewStepResponse
-    }
-  } catch {
-    // Graceful fallback to client-side clinical reasoning engine
+  // HARD CAP: If 7 questions reached, ALWAYS return completion response immediately!
+  if (history.length >= MAX_QUESTIONS) {
+    return evaluateClientClinicalTree(history, language, department)
   }
 
-  // Fallback to client-side SOCRATES, HPI, & AYUSH engine
+  // 1. Try Gemini AI with a strict 2-second timeout if configured
+  if (isGeminiConfigured() && history.length > 0 && history.length < MAX_QUESTIONS - 1) {
+    try {
+      // 2-second timeout promise to prevent any UI stall
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Gemini timeout')), 2000)
+      )
+
+      const geminiPromise = generateGeminiInterviewTurn({
+        history: history.map((h) => ({
+          field_key: h.field_key,
+          question: h.question,
+          answer: h.answer,
+        })),
+        language,
+        department,
+      })
+
+      const geminiResult = await Promise.race([geminiPromise, timeoutPromise])
+
+      if (geminiResult && geminiResult.question) {
+        // Ensure Gemini doesn't repeat an already answered topic
+        const isDuplicate = history.some(
+          (h) => h.field_key === geminiResult.field_key || h.question === geminiResult.question
+        )
+
+        if (!isDuplicate) {
+          // Force strict cap on progress display
+          return {
+            ...geminiResult,
+            progress: {
+              current: Math.min(history.length + 1, MAX_QUESTIONS),
+              total: MAX_QUESTIONS,
+            },
+            is_complete: history.length + 1 >= MAX_QUESTIONS,
+          } as InterviewStepResponse
+        }
+      }
+    } catch {
+      // Gemini timed out or 429 quota reached; use instant deterministic clinical tree
+    }
+  }
+
+  // 2. Deterministic SOCRATES, HPI, & AYUSH clinical reasoning engine
   return evaluateClientClinicalTree(history, language, department)
 }
 
@@ -396,7 +429,7 @@ function evaluateClientClinicalTree(
   // ═══════════════════════════════════════════════════════════════════
   const chief = history.find((h) => h.field_key === 'chief_complaint')?.answer?.toLowerCase() || ''
   const isPain = chief.includes('pain') || chief.includes('दर्द') || chief.includes('stomach') || chief.includes('body')
-  const total = isPain ? 8 : 7
+  const total = 7 // Hard cap: exactly 7 questions max
 
   // Completion check
   if (turnCount >= total) {
@@ -411,7 +444,7 @@ function evaluateClientClinicalTree(
         {
           label: 'Proceed to Report Scanning',
           value: 'proceed',
-          label_localized: language === 'hi' ? 'दस्तावेज़ स्कैनिंग के लिए आगे बढ़ें' : 'Proceed to Report Scanning',
+          label_localized: language === 'hi' ? 'दस्तावेज़ स्कैनिंग के लिए आगे बढ़ें ➔' : 'Proceed to Report Scanning ➔',
         },
       ],
       allow_free_voice: false,

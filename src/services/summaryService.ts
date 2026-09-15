@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase'
+import { isGeminiConfigured, generateClinicalSummaryWithGemini } from './geminiClient'
 
 export interface StructuredClinicalSummary {
   chief_complaint: string
@@ -163,11 +164,46 @@ export async function generateAndSaveSummary(sessionId: string): Promise<Clinica
       return data.summary as ClinicalSummaryRecord
     }
   } catch (err) {
-    console.warn('Edge function generate-summary unavailable, running resilient local summarizer:', err)
+    console.warn('Edge function generate-summary unavailable, trying direct Gemini summarizer:', err)
   }
 
-  // 2. Client-side fallback assembler
-  const summaryJson = await assembleClientClinicalSummary(sessionId)
+  let summaryJson: StructuredClinicalSummary
+
+  // 2. Try direct Gemini AI summarization if configured
+  if (isGeminiConfigured()) {
+    try {
+      const [
+        { data: session },
+        { data: historyResponses },
+        { data: redFlags },
+        { data: documents },
+      ] = await Promise.all([
+        supabase.from('sessions').select('*, patients(*)').eq('id', sessionId).maybeSingle(),
+        supabase.from('history_responses').select('*').eq('session_id', sessionId).order('captured_at', { ascending: true }),
+        supabase.from('red_flags').select('*').eq('session_id', sessionId),
+        supabase.from('documents').select('*').eq('session_id', sessionId),
+      ])
+
+      const geminiSummary = await generateClinicalSummaryWithGemini({
+        patient: session?.patients,
+        historyResponses: historyResponses || [],
+        redFlags: redFlags || [],
+        documents: documents || [],
+      })
+
+      if (geminiSummary && geminiSummary.chief_complaint) {
+        summaryJson = geminiSummary as StructuredClinicalSummary
+      } else {
+        summaryJson = await assembleClientClinicalSummary(sessionId)
+      }
+    } catch (geminiErr) {
+      console.warn('Direct Gemini summary error, using clinical assembler:', geminiErr)
+      summaryJson = await assembleClientClinicalSummary(sessionId)
+    }
+  } else {
+    // 3. Client-side deterministic assembler
+    summaryJson = await assembleClientClinicalSummary(sessionId)
+  }
 
   const summaryTextEn = `PATIENT CLINICAL PRE-CONSULT SUMMARY
 1. Chief Complaint: ${summaryJson.chief_complaint}
