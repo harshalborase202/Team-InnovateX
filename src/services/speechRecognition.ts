@@ -68,7 +68,13 @@ class SpeechRecognitionService {
       recognition.maxAlternatives = 1
 
       this.isListening = true
-      handlers.onTranscript('🎤 सुन रहे हैं... कृपया बोलें (Listening... please speak)', false)
+      const isMarathi = langCode.startsWith('mr')
+      handlers.onTranscript(
+        isMarathi
+          ? '🎤 ऐकत आहोत... कृपया बोला (Listening... please speak)'
+          : '🎤 सुन रहे हैं... कृपया बोलें (Listening... please speak)',
+        false
+      )
 
       let lastRecognizedText = ''
 

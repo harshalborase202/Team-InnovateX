@@ -388,9 +388,15 @@ export const ScreenConverse: React.FC = () => {
     <div className="min-h-screen flex flex-col bg-sky-50/50 text-slate-800">
       <KioskHeader
         showBack={true}
-        onBack={() => navigate('/')}
+        onBack={() => navigate('/kiosk')}
         stepNumber={2}
-        stepTitle={language === 'hi' ? 'चरण 2: स्वास्थ्य बातचीत' : 'Step 2: Health Interview'}
+        stepTitle={
+          language === 'mr'
+            ? 'पायरी २: आरोग्य संवाद'
+            : language === 'hi'
+            ? 'चरण 2: स्वास्थ्य बातचीत'
+            : 'Step 2: Health Interview'
+        }
       />
 
       {/* ── RED FLAG EMERGENCY SCREEN ─────────────────────────────────── */}
@@ -418,11 +424,11 @@ export const ScreenConverse: React.FC = () => {
                   className="font-bold text-emerald-900 bg-emerald-100 border border-emerald-300 px-3 py-1 rounded-xl text-xs sm:text-sm flex items-center gap-1.5 shadow-xs"
                 >
                   <span>🌿</span>
-                  <span>आयुष (आयुर्वेद) ओपीडी</span>
+                  <span>{language === 'mr' ? 'आयुष (आयुर्वेद) ओपीडी' : language === 'hi' ? 'आयुष (आयुर्वेद) ओपीडी' : 'AYUSH OPD'}</span>
                 </span>
               ) : (
                 <span className="font-semibold text-teal-800 bg-teal-50 border border-teal-200 px-3 py-1 rounded-xl text-xs sm:text-sm">
-                  🏥 सामान्य ओपीडी
+                  {language === 'mr' ? '🏥 सामान्य ओपीडी' : language === 'hi' ? '🏥 सामान्य ओपीडी' : '🏥 General OPD'}
                 </span>
               )}
               {currentSession?.token_number && (
@@ -440,7 +446,9 @@ export const ScreenConverse: React.FC = () => {
           {currentTurn?.progress && (
             <div className="w-full flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
               <span className="text-sm font-bold text-teal-800 bg-teal-50 px-3 py-1 rounded-full">
-                {language === 'hi'
+                {language === 'mr'
+                  ? `प्रश्न ${currentTurn.progress.current} (सुमारे ${currentTurn.progress.total} पैकी)`
+                  : language === 'hi'
                   ? `प्रश्न ${currentTurn.progress.current} (लगभग ${currentTurn.progress.total} में से)`
                   : `Question ${currentTurn.progress.current} of about ${currentTurn.progress.total}`}
               </span>
@@ -469,14 +477,18 @@ export const ScreenConverse: React.FC = () => {
             className="text-2xl sm:text-3xl lg:text-4xl font-extrabold text-teal-950 mb-3 tracking-tight leading-snug"
           >
             {loadingNext
-              ? language === 'hi'
+              ? language === 'mr'
+                ? 'पुढील प्रश्न तयार केला जात आहे...'
+                : language === 'hi'
                 ? 'अगला प्रश्न तैयार किया जा रहा है...'
                 : 'Preparing next clinical question...'
               : currentTurn?.question_localized || currentTurn?.question}
           </h2>
 
           <p className="text-base sm:text-lg font-medium text-slate-500 mb-6">
-            {language === 'hi'
+            {language === 'mr'
+              ? 'खालील पर्यायावर स्पर्श करा किंवा माइक दाबून बोला'
+              : language === 'hi'
               ? 'नीचे दिए गए विकल्प को छुएँ या माइक दबाकर बोलें'
               : 'Tap an option below or press the microphone to speak'}
           </p>
@@ -529,9 +541,13 @@ export const ScreenConverse: React.FC = () => {
 
               <span className="text-base sm:text-lg font-bold text-slate-700 mb-2">
                 {isListening
-                  ? language === 'hi'
+                  ? language === 'mr'
+                    ? 'ऐकत आहोत... कृपया बोला'
+                    : language === 'hi'
                     ? 'सुन रहे हैं... कृपया बोलें'
                     : 'Listening... please speak now'
+                  : language === 'mr'
+                  ? 'बोलून उत्तर देण्यासाठी माइक दाबा'
                   : language === 'hi'
                   ? 'बोलकर उत्तर देने के लिए माइक दबाएँ'
                   : 'Press mic to answer with your voice'}
@@ -541,7 +557,7 @@ export const ScreenConverse: React.FC = () => {
               {liveTranscript && (
                 <div className="w-full bg-sky-50 border-2 border-sky-300 rounded-2xl p-4 mt-2 mb-3 text-left">
                   <span className="text-xs font-bold text-sky-800 block mb-1 uppercase tracking-wider">
-                    आवाज़ पहचानी गई (Recognized Voice):
+                    {language === 'mr' ? 'आवाज ओळखला गेला (Recognized Voice):' : 'आवाज़ पहचानी गई (Recognized Voice):'}
                   </span>
                   <p className="text-xl font-bold text-slate-900">{liveTranscript}</p>
                 </div>
@@ -554,39 +570,49 @@ export const ScreenConverse: React.FC = () => {
                 </div>
               )}
 
-              {/* Demo voice simulation helper (for browser subagent testing) */}
+              {/* Demo voice simulation helper */}
               <div className="flex flex-wrap items-center justify-center gap-2 mt-2">
                 <button
                   id="btn-demo-speak-ayush"
                   type="button"
                   onClick={() =>
-                    simulateVoiceAnswer('मुझे वात और जोड़ों में दर्द की तकलीफ़ रहती है')
+                    simulateVoiceAnswer(
+                      language === 'mr'
+                        ? 'मला वात आणि सांधेदुखीचा त्रास राहतो'
+                        : 'मुझे वात और जोड़ों में दर्द की तकलीफ़ रहती है'
+                    )
                   }
                   className="text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 px-3 py-1.5 rounded-lg border border-emerald-300 cursor-pointer"
                 >
-                  🌿 नमूना आवाज़: "वात व जोड़ों का दर्द"
+                  {language === 'mr' ? '🌿 नमुना आवाज: "वात व सांधेदुखी"' : '🌿 नमूना आवाज़: "वात व जोड़ों का दर्द"'}
                 </button>
                 <button
                   id="btn-demo-speak-pain"
                   type="button"
                   onClick={() =>
-                    simulateVoiceAnswer('मुझे २ दिन से पेट में तेज़ दर्द हो रहा है')
+                    simulateVoiceAnswer(
+                      language === 'mr'
+                        ? 'मला २ दिवसांपासून पोटात तीव्र दुखत आहे'
+                        : 'मुझे २ दिन से पेट में तेज़ दर्द हो रहा है'
+                    )
                   }
                   className="text-xs font-bold text-teal-800 bg-teal-50 hover:bg-teal-100 px-3 py-1.5 rounded-lg border border-teal-200 cursor-pointer"
                 >
-                  🗣️ नमूना आवाज़: "पेट में तेज़ दर्द"
+                  {language === 'mr' ? '🗣️ नमुना आवाज: "पोटात तीव्र वेदना"' : '🗣️ नमूना आवाज़: "पेट में तेज़ दर्द"'}
                 </button>
                 <button
                   id="btn-demo-speak-chest"
                   type="button"
                   onClick={() =>
                     simulateVoiceAnswer(
-                      'सीने में भारी दबाव और सांस लेने में बहुत तकलीफ़ है (Severe chest pain and breathlessness)'
+                      language === 'mr'
+                        ? 'छातीत तीव्र कळा आणि श्वास घेताना खूप त्रास होतोय (Severe chest pain)'
+                        : 'सीने में भारी दबाव और सांस लेने में बहुत तकलीफ़ है (Severe chest pain and breathlessness)'
                     )
                   }
                   className="text-xs font-bold text-red-800 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg border border-red-200 cursor-pointer"
                 >
-                  ⚠️ आपातकालीन आवाज़ (Test Red Flag)
+                  {language === 'mr' ? '⚠️ आणीबाणी चाचणी (Test Red Flag)' : '⚠️ आपातकालीन आवाज़ (Test Red Flag)'}
                 </button>
               </div>
 
@@ -598,7 +624,9 @@ export const ScreenConverse: React.FC = () => {
                     onClick={() => setShowManualInput(true)}
                     className="text-xs font-semibold text-slate-500 hover:text-slate-800 underline cursor-pointer"
                   >
-                    लिखकर उत्तर देना चाहते हैं? (Type with keyboard)
+                    {language === 'mr'
+                      ? 'टाइप करून उत्तर देऊ इच्छिता? (Type with keyboard)'
+                      : 'लिखकर उत्तर देना चाहते हैं? (Type with keyboard)'}
                   </button>
                 ) : (
                   <div className="flex gap-2 mt-2 w-full max-w-md">
@@ -608,7 +636,11 @@ export const ScreenConverse: React.FC = () => {
                       value={manualText}
                       onChange={(e) => setManualText(e.target.value)}
                       placeholder={
-                        language === 'hi' ? 'यहाँ अपना उत्तर लिखें...' : 'Type your answer here...'
+                        language === 'mr'
+                          ? 'येथे आपले उत्तर लिहा...'
+                          : language === 'hi'
+                          ? 'यहाँ अपना उत्तर लिखें...'
+                          : 'Type your answer here...'
                       }
                       className="flex-1 px-4 py-2.5 rounded-xl border-2 border-slate-300 text-slate-900 text-base focus:border-teal-700 focus:outline-none"
                     />
@@ -618,7 +650,7 @@ export const ScreenConverse: React.FC = () => {
                       onClick={() => handleAnswer(manualText, 'touch')}
                       className="px-4 py-2.5 rounded-xl bg-teal-700 text-white font-bold hover:bg-teal-800 cursor-pointer"
                     >
-                      भेजें (Send)
+                      {language === 'mr' ? 'पाठवा (Send)' : 'भेजें (Send)'}
                     </button>
                   </div>
                 )}

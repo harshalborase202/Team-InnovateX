@@ -24,7 +24,9 @@ export const ScreenSummary: React.FC = () => {
   // Calming audio confirmation on screen load
   useEffect(() => {
     const audioText =
-      language === 'hi'
+      language === 'mr'
+        ? 'धन्यवाद! तुमची आरोग्य माहिती यशस्वीरीत्या नोंदवून घेण्यात आली आहे. डॉक्टर लवकरच त्याची पाहणी करतील. कृपया आपला टोकन नंबर लक्षात ठेवा आणि पाचारण होईपर्यंत थांबा.'
+        : language === 'hi'
         ? 'धन्यवाद! आपकी स्वास्थ्य जानकारी सफलतापूर्वक दर्ज कर ली गई है। डॉक्टर जल्द ही इसकी समीक्षा करेंगे। कृपया अपना टोकन नंबर नोट करें और बुलाए जाने की प्रतीक्षा करें।'
         : 'Thank you, your information has been recorded and the doctor will review it shortly. Please take your token number and wait to be called.'
 
@@ -59,9 +61,13 @@ export const ScreenSummary: React.FC = () => {
         setTokenNumber(activeSession.token_number || 'OPD-101')
         setDepartmentName(
           activeSession.department === 'ayush'
-            ? language === 'hi'
+            ? language === 'mr'
+              ? 'आयुष (आयुर्वेद) ओपीडी'
+              : language === 'hi'
               ? 'आयुष (आयुर्वेद) ओपीडी'
               : 'AYUSH (Ayurveda) OPD'
+            : language === 'mr'
+            ? 'सामान्य चिकित्सा ओपीडी'
             : language === 'hi'
             ? 'सामान्य चिकित्सा ओपीडी'
             : 'General Medicine OPD'
@@ -98,7 +104,7 @@ export const ScreenSummary: React.FC = () => {
     setCurrentSession(null)
     sessionStorage.removeItem('medikiosk_patient')
     sessionStorage.removeItem('medikiosk_session')
-    navigate('/')
+    navigate('/kiosk')
   }
 
   // Quick jump to physician consultation view
@@ -111,7 +117,13 @@ export const ScreenSummary: React.FC = () => {
       <KioskHeader
         showBack={false}
         stepNumber={4}
-        stepTitle={language === 'hi' ? 'चरण 4: पंजीकरण पूर्ण' : 'Step 4: Check-in Complete'}
+        stepTitle={
+          language === 'mr'
+            ? 'पायरी ४: नोंदणी पूर्ण'
+            : language === 'hi'
+            ? 'चरण 4: पंजीकरण पूर्ण'
+            : 'Step 4: Check-in Complete'
+        }
       />
 
       <main className="flex-1 flex flex-col items-center justify-center p-4 sm:p-6 max-w-3xl mx-auto w-full text-center">
@@ -121,7 +133,7 @@ export const ScreenSummary: React.FC = () => {
             ✓
           </div>
           <div className="absolute -bottom-2 right-1/2 translate-x-1/2 bg-emerald-800 text-white text-xs font-extrabold px-3 py-1 rounded-full uppercase tracking-wider shadow-md">
-            {language === 'hi' ? 'सफल' : 'Recorded'}
+            {language === 'mr' ? 'यशस्वी' : language === 'hi' ? 'सफल' : 'Recorded'}
           </div>
         </div>
 
@@ -130,14 +142,18 @@ export const ScreenSummary: React.FC = () => {
           id="summary-heading"
           className="text-3xl sm:text-4xl lg:text-5xl font-black text-teal-950 mb-3 tracking-tight leading-tight"
         >
-          {language === 'hi'
+          {language === 'mr'
+            ? 'तुमचा आरोग्य तपशील नोंदवून घेण्यात आला आहे'
+            : language === 'hi'
             ? 'आपका स्वास्थ्य विवरण दर्ज कर लिया गया है'
             : 'All Done, Thank You!'}
         </h2>
 
         {/* Reassurance Message (No clinical jargon) */}
         <p className="text-lg sm:text-xl font-medium text-slate-600 max-w-xl mx-auto mb-8 leading-relaxed">
-          {language === 'hi'
+          {language === 'mr'
+            ? 'डॉक्टर लवकरच आपल्या तपशिलांची पाहणी करतील. आपण पूर्णपणे तयार आहात, कृपया आपली पाळी येईपर्यंत प्रतीक्षा कक्षात बसा.'
+            : language === 'hi'
             ? 'डॉक्टर जल्द ही आपके विवरण की समीक्षा करेंगे। आप पूरी तरह तैयार हैं, कृपया अपनी बारी आने तक प्रतीक्षा कक्ष में बैठें।'
             : 'Your information has been recorded and the doctor will review it shortly. You are ready — please wait in the lounge to be called.'}
         </p>
@@ -151,7 +167,7 @@ export const ScreenSummary: React.FC = () => {
           <div className="flex items-center justify-between pb-4 border-b-2 border-dashed border-slate-200 mb-5">
             <div>
               <span className="text-xs font-bold text-slate-400 uppercase tracking-widest block">
-                {language === 'hi' ? 'ओपीडी टोकन नंबर' : 'OPD Token Number'}
+                {language === 'mr' ? 'ओपीडी टोकन क्रमांक' : language === 'hi' ? 'ओपीडी टोकन नंबर' : 'OPD Token Number'}
               </span>
               <span
                 id="text-token-number"
@@ -169,16 +185,16 @@ export const ScreenSummary: React.FC = () => {
           <div className="space-y-3.5">
             <div className="flex items-center justify-between text-sm sm:text-base">
               <span className="text-slate-500 font-semibold">
-                {language === 'hi' ? 'मरीज़ का नाम' : 'Patient Name'}:
+                {language === 'mr' ? 'रुग्णाचे नाव' : language === 'hi' ? 'मरीज़ का नाम' : 'Patient Name'}:
               </span>
               <span className="font-extrabold text-slate-900">
-                {currentPatient?.name || 'Walk-in Patient'}
+                {currentPatient?.name || (language === 'mr' ? 'नोंदणीकृत रुग्ण' : 'Walk-in Patient')}
               </span>
             </div>
 
             <div className="flex items-center justify-between text-sm sm:text-base">
               <span className="text-slate-500 font-semibold">
-                {language === 'hi' ? 'ओपीडी विभाग' : 'Department'}:
+                {language === 'mr' ? 'ओपीडी विभाग' : language === 'hi' ? 'ओपीडी विभाग' : 'Department'}:
               </span>
               <span className="font-bold text-teal-800 bg-teal-50 px-3 py-1 rounded-xl text-xs sm:text-sm border border-teal-200">
                 {departmentName}
@@ -187,10 +203,10 @@ export const ScreenSummary: React.FC = () => {
 
             <div className="flex items-center justify-between text-sm sm:text-base">
               <span className="text-slate-500 font-semibold">
-                {language === 'hi' ? 'कक्ष / रूम नंबर' : 'Assigned Room'}:
+                {language === 'mr' ? 'कक्ष / रूम नंबर' : language === 'hi' ? 'कक्ष / रूम नंबर' : 'Assigned Room'}:
               </span>
               <span className="font-bold text-emerald-900 bg-emerald-50 px-3 py-1 rounded-xl text-xs sm:text-sm border border-emerald-200">
-                {language === 'hi' ? 'कमरा नं. ४ • डॉ. शर्मा' : 'Room No. 4 • Dr. Sharma'}
+                {language === 'mr' ? 'खोली क्र. ४ • डॉ. शर्मा' : language === 'hi' ? 'कमरा नं. ४ • डॉ. शर्मा' : 'Room No. 4 • Dr. Sharma'}
               </span>
             </div>
           </div>
@@ -199,7 +215,9 @@ export const ScreenSummary: React.FC = () => {
           <div className="mt-6 pt-4 border-t border-slate-100 flex items-center gap-2 text-xs font-semibold text-slate-500">
             <span className="text-base">🔔</span>
             <span>
-              {language === 'hi'
+              {language === 'mr'
+                ? 'स्क्रीनवर आपला टोकन क्रमांक आल्यावर डॉक्टरांच्या कक्षात जा'
+                : language === 'hi'
                 ? 'स्क्रीन पर आपका टोकन नंबर आने पर डॉक्टर के कक्ष में जाएँ'
                 : 'Watch the OPD screen for your token call.'}
             </span>
@@ -211,7 +229,9 @@ export const ScreenSummary: React.FC = () => {
           type="button"
           onClick={() =>
             playAudio(
-              language === 'hi'
+              language === 'mr'
+                ? 'धन्यवाद! तुमची माहिती नोंदवली आहे. कृपया पाचारण होईपर्यंत थांबा.'
+                : language === 'hi'
                 ? 'धन्यवाद! आपकी जानकारी दर्ज कर ली गई है। कृपया बुलाए जाने की प्रतीक्षा करें।'
                 : 'Thank you, your information has been recorded. Please wait to be called.'
             )
@@ -219,7 +239,7 @@ export const ScreenSummary: React.FC = () => {
           className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 font-semibold text-sm hover:bg-slate-50 mb-6 shadow-xs cursor-pointer"
         >
           <span>🔊</span>
-          <span>{language === 'hi' ? 'आवाज़ दोबारा सुनें' : 'Listen Again'}</span>
+          <span>{language === 'mr' ? 'आवाज पुन्हा ऐका' : language === 'hi' ? 'आवाज़ दोबारा सुनें' : 'Listen Again'}</span>
         </button>
 
         {/* ── ACTION BUTTONS ───────────────────────────────────────────── */}
@@ -231,7 +251,7 @@ export const ScreenSummary: React.FC = () => {
             onClick={handleResetForNextPatient}
             className="w-full py-4 sm:py-5 px-6 rounded-2xl bg-teal-700 hover:bg-teal-800 text-white font-extrabold text-xl shadow-lg hover:shadow-xl active:scale-98 transition-all flex items-center justify-center gap-3 cursor-pointer min-h-[64px]"
           >
-            <span>{language === 'hi' ? 'समाप्त • नया मरीज़' : 'Done • Next Patient'}</span>
+            <span>{language === 'mr' ? 'पूर्ण • पुढील रुग्ण' : language === 'hi' ? 'समाप्त • नया मरीज़' : 'Done • Next Patient'}</span>
             <span className="text-2xl">➔</span>
           </button>
 
@@ -244,7 +264,9 @@ export const ScreenSummary: React.FC = () => {
           >
             <span>🩺</span>
             <span>
-              {language === 'hi'
+              {language === 'mr'
+                ? 'डॉक्टर दृश्य उघडा (Open Clinician View)'
+                : language === 'hi'
                 ? 'डॉक्टर दृश्य खोलें (Open Clinician Consult View)'
                 : 'Open Clinician Consult View (/clinician)'}
             </span>

@@ -169,9 +169,21 @@ class SpeechService {
     // Match best available native voice if available
     const voices = this.synth.getVoices?.() || []
     const prefix = langCode.split('-')[0].toLowerCase()
-    const voice = voices.find(
+    let voice = voices.find(
       (v) => v.lang.toLowerCase() === langCode.toLowerCase() || v.lang.toLowerCase().startsWith(prefix)
     )
+
+    // Devanagari script fallback: If Windows/browser has no dedicated Marathi voice,
+    // fallback to Hindi voice (hi-IN) which pronounces Devanagari script cleanly
+    if (!voice && prefix === 'mr') {
+      voice = voices.find(
+        (v) => v.lang.toLowerCase().startsWith('hi') || v.lang.toLowerCase() === 'hi-in'
+      )
+      if (voice) {
+        utterance.lang = 'hi-IN'
+      }
+    }
+
     if (voice) {
       utterance.voice = voice
     }

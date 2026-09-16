@@ -428,7 +428,13 @@ export const ScreenScan: React.FC = () => {
         showBack={true}
         onBack={() => navigate('/converse')}
         stepNumber={3}
-        stepTitle={language === 'hi' ? 'चरण 3: पुराने पर्चे व जाँच स्कैन' : 'Step 3: Medical Document Scan'}
+        stepTitle={
+          language === 'mr'
+            ? 'पायरी ३: जुने रिपोर्ट व औषधपत्रिका स्कॅन'
+            : language === 'hi'
+            ? 'चरण 3: पुराने पर्चे व जाँच स्कैन'
+            : 'Step 3: Medical Document Scan'
+        }
       />
 
       <main className="flex-1 flex flex-col items-center justify-center p-4 sm:p-6 max-w-4xl mx-auto w-full">
@@ -447,7 +453,7 @@ export const ScreenScan: React.FC = () => {
               )}
               {documents.length > 0 && (
                 <span className="font-bold text-emerald-900 bg-emerald-100 border border-emerald-300 px-3 py-1 rounded-xl text-xs sm:text-sm">
-                  ✓ {documents.length} {language === 'hi' ? 'दस्तावेज़ जाँचे गए' : 'Scanned'}
+                  ✓ {documents.length} {language === 'mr' ? 'कागदपत्रे तपासली गेली' : language === 'hi' ? 'दस्तावेज़ जाँचे गए' : 'Scanned'}
                 </span>
               )}
             </div>
@@ -466,14 +472,18 @@ export const ScreenScan: React.FC = () => {
             id="scan-heading-text"
             className="text-2xl sm:text-3xl lg:text-4xl font-extrabold text-teal-950 mb-3 tracking-tight leading-snug"
           >
-            {language === 'hi'
+            {language === 'mr'
+              ? 'जुने प्रिस्क्रिप्शन किंवा तपासणी अहवालाचा फोटो घ्या'
+              : language === 'hi'
               ? 'पुराने पर्चे या जाँच रिपोर्ट की फ़ोटो लें'
               : 'Take a photo of your medical documents'}
           </h2>
 
           {/* Friendly Explanation (Not Jargon) */}
           <p className="text-base sm:text-lg font-medium text-slate-600 max-w-xl mb-6">
-            {language === 'hi'
+            {language === 'mr'
+              ? 'तुमच्याकडे जुनी औषधपत्रिका, रक्त तपासणी किंवा डिस्चार्ज कार्ड आहे का? खालील कॅमेरा बटण दाबून फोटो काढा.'
+              : language === 'hi'
               ? 'क्या आपके पास कोई पुराना डॉक्टर का पर्चा, खून की जाँच या डिस्चार्ज कार्ड है? नीचे कैमरा बटन दबाकर फ़ोटो खींचें।'
               : 'Have any old prescriptions, lab reports, or discharge papers? Capture a quick photo below so the doctor has your complete history.'}
           </p>
@@ -500,7 +510,9 @@ export const ScreenScan: React.FC = () => {
             >
               <span className="text-3xl sm:text-4xl">📸</span>
               <span>
-                {language === 'hi'
+                {language === 'mr'
+                  ? 'फोटो काढा (Take Photo)'
+                  : language === 'hi'
                   ? 'फ़ोटो खींचें (Take Photo)'
                   : 'Take Document Photo'}
               </span>
@@ -515,7 +527,7 @@ export const ScreenScan: React.FC = () => {
                 disabled={isProcessing}
                 className="text-xs font-bold text-teal-800 bg-teal-50 hover:bg-teal-100 px-3.5 py-2 rounded-xl border border-teal-200 cursor-pointer transition-all"
               >
-                ⚡ नमूना पर्चा जोड़ें (Demo Rx)
+                {language === 'mr' ? '⚡ नमुना औषधपत्रिका (Demo Rx)' : '⚡ नमूना पर्चा जोड़ें (Demo Rx)'}
               </button>
               <button
                 id="btn-sample-lab"
@@ -524,7 +536,7 @@ export const ScreenScan: React.FC = () => {
                 disabled={isProcessing}
                 className="text-xs font-bold text-sky-800 bg-sky-50 hover:bg-sky-100 px-3.5 py-2 rounded-xl border border-sky-200 cursor-pointer transition-all"
               >
-                🧪 नमूना लैब रिपोर्ट (Demo Lab)
+                {language === 'mr' ? '🧪 नमुना लॅब रिपोर्ट (Demo Lab)' : '🧪 नमूना लैब रिपोर्ट (Demo Lab)'}
               </button>
             </div>
           </div>
@@ -794,7 +806,13 @@ export const ScreenScan: React.FC = () => {
               disabled={isProcessing}
               className="w-full sm:w-auto px-6 py-3.5 rounded-2xl border-2 border-slate-300 text-slate-600 hover:text-slate-900 hover:bg-slate-100 font-bold text-base cursor-pointer transition-all text-center min-h-[56px]"
             >
-              <span>{language === 'hi' ? 'आगे बढ़ें, कोई पर्चा नहीं है' : "Skip, I don't have any"}</span>
+              <span>
+                {language === 'mr'
+                  ? 'पुढे जा, जुने कागदपत्रे नाहीत'
+                  : language === 'hi'
+                  ? 'आगे बढ़ें, कोई पर्चा नहीं है'
+                  : "Skip, I don't have any"}
+              </span>
               <span className="ml-2">➔</span>
             </button>
 
@@ -808,7 +826,9 @@ export const ScreenScan: React.FC = () => {
                 className="w-full sm:w-auto flex-1 px-8 py-4 rounded-2xl bg-teal-700 hover:bg-teal-800 text-white font-extrabold text-lg sm:text-xl shadow-lg hover:shadow-xl active:scale-98 transition-all flex items-center justify-center gap-3 cursor-pointer min-h-[56px]"
               >
                 <span>
-                  {language === 'hi'
+                  {language === 'mr'
+                    ? 'पुढील पायरी: नोंदणी सारांश पहा'
+                    : language === 'hi'
                     ? 'अगला चरण: डॉक्टर सारांश देखें'
                     : 'Continue to Summary'}
                 </span>

@@ -80,6 +80,8 @@ export function ScreenPatientDashboard() {
     const patientAudio =
       language === 'hi'
         ? 'मरीज़ स्वास्थ्य खाता पोर्टल। अपने पिछले ओपीडी परामर्श, डिजिटल पर्चे और स्वास्थ्य सारांश यहाँ देखें।'
+        : language === 'mr'
+        ? 'रुग्ण आरोग्य खाते पोर्टल. आपल्या मागील ओपीडी सल्लामसलत, डिजिटल चिठ्ठ्या आणि आरोग्य सारांश येथे पाहा.'
         : 'Patient Health Portal. View your previous OPD consultations, digital prescriptions, and clinical summaries.'
     setScreenAudio(patientAudio)
   }, [language, setScreenAudio])
@@ -333,10 +335,10 @@ export function ScreenPatientDashboard() {
             </button>
 
             <Link
-              to="/"
+              to="/kiosk"
               className="text-sm font-bold text-[#0f6b8e] hover:underline flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-sky-50 border border-sky-200 min-h-[48px]"
             >
-              ← अस्पताल कियोस्क (Hospital Kiosk)
+              ← OPD कियोस्क (Hospital Kiosk)
             </Link>
           </div>
         </header>
@@ -671,10 +673,10 @@ export function ScreenPatientDashboard() {
             </button>
 
             <Link
-              to="/"
+              to="/kiosk"
               className="text-xs font-bold text-slate-600 hover:text-slate-900 px-3 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 min-h-[48px] flex items-center"
             >
-              कियोस्क मोड (Kiosk)
+              OPD कियोस्क (Kiosk)
             </Link>
             <button
               type="button"

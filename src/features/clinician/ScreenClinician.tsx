@@ -228,11 +228,11 @@ export const ScreenClinician: React.FC = () => {
               <span className="font-extrabold">{t('settings')}</span>
             </button>
             <button
-              onClick={() => navigate('/')}
+              onClick={() => navigate('/kiosk')}
               type="button"
               className="text-xs font-bold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 px-3 py-2 rounded-xl border border-slate-600 cursor-pointer min-h-[44px]"
             >
-              ← Patient Kiosk
+              ← OPD Kiosk
             </button>
           </div>
         </header>
@@ -304,10 +304,10 @@ export const ScreenClinician: React.FC = () => {
               <span>Quick Demo Clinician Access (1-Click)</span>
             </button>
             <button
-              onClick={() => navigate('/')}
+              onClick={() => navigate('/kiosk')}
               className="text-xs text-slate-400 hover:text-slate-200 mt-4 underline cursor-pointer"
             >
-              ← Back to Patient Kiosk
+              ← Back to OPD Kiosk
             </button>
           </div>
         </div>
@@ -373,12 +373,12 @@ export const ScreenClinician: React.FC = () => {
           </button>
 
           <button
-            onClick={() => navigate('/')}
+            onClick={() => navigate('/kiosk')}
             type="button"
             className="text-xs font-bold text-slate-300 hover:text-white bg-slate-800 px-3 py-2 rounded-xl border border-slate-700 cursor-pointer min-h-[48px]"
             aria-label="Return to patient kiosk"
           >
-            ← Open Kiosk
+            ← OPD Kiosk
           </button>
           <button
             id="btn-clinician-logout"

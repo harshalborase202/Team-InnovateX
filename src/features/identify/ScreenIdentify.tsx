@@ -261,14 +261,18 @@ export const ScreenIdentify: React.FC<ScreenIdentifyProps> = ({ onNext, onBack }
           id="link-kiosk-to-patient-portal"
           className="text-xs font-bold text-[#0f6b8e] bg-sky-50 border border-sky-200 px-3.5 py-1.5 rounded-xl hover:bg-sky-100 flex items-center gap-1 shadow-xs transition-colors"
         >
-          <span>👤</span> मरीज पोर्टल (Patient Portal) →
+          <span>👤</span> {language === 'mr' ? 'रुग्ण पोर्टल (Patient Portal) →' : language === 'hi' ? 'मरीज पोर्टल (Patient Portal) →' : 'Patient Portal →'}
         </a>
       </div>
 
       {/* ── TWO-MODE DEPARTMENT SELECTOR (GENERAL OPD DEFAULT VS AYUSH OPD) ── */}
       <div className="mb-6 flex flex-col items-center">
         <span className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">
-          {language === 'hi' ? 'ओपीडी विभाग चुनें (Select Department Mode):' : 'Select Department Mode:'}
+          {language === 'mr'
+            ? 'ओपीडी विभाग निवडा (Select Department):'
+            : language === 'hi'
+            ? 'ओपीडी विभाग चुनें (Select Department Mode):'
+            : 'Select Department Mode:'}
         </span>
         <div className="inline-flex p-1.5 bg-slate-100 rounded-2xl border-2 border-slate-200 shadow-xs gap-1.5">
           {/* Mode 1: General Allopathic OPD (Default) */}
@@ -283,13 +287,13 @@ export const ScreenIdentify: React.FC<ScreenIdentifyProps> = ({ onNext, onBack }
             }`}
           >
             <span className="text-lg">🏥</span>
-            <span>{language === 'hi' ? 'सामान्य ओपीडी' : 'General OPD'}</span>
+            <span>{language === 'mr' ? 'सामान्य ओपीडी' : language === 'hi' ? 'सामान्य ओपीडी' : 'General OPD'}</span>
             <span
               className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
                 department !== 'ayush' ? 'bg-teal-900 text-teal-100' : 'bg-slate-200 text-slate-600'
               }`}
             >
-              {language === 'hi' ? 'डिफ़ॉल्ट' : 'Default'}
+              {language === 'mr' ? 'डीफॉल्ट' : language === 'hi' ? 'डिफ़ॉल्ट' : 'Default'}
             </span>
           </button>
 
@@ -305,10 +309,10 @@ export const ScreenIdentify: React.FC<ScreenIdentifyProps> = ({ onNext, onBack }
             }`}
           >
             <span className="text-lg">🌿</span>
-            <span>{language === 'hi' ? 'आयुष (आयुर्वेद ओपीडी)' : 'AYUSH (Ayurveda)'}</span>
+            <span>{language === 'mr' ? 'आयुष (आयुर्वेद ओपीडी)' : language === 'hi' ? 'आयुष (आयुर्वेद ओपीडी)' : 'AYUSH (Ayurveda)'}</span>
             {department === 'ayush' && (
               <span className="text-xs px-2 py-0.5 rounded-full font-semibold bg-emerald-900 text-emerald-100">
-                ✓ सक्रिय
+                {language === 'mr' ? '✓ सक्रिय' : language === 'hi' ? '✓ सक्रिय' : '✓ Active'}
               </span>
             )}
           </button>
@@ -549,14 +553,14 @@ export const ScreenIdentify: React.FC<ScreenIdentifyProps> = ({ onNext, onBack }
               />
               <div className="flex justify-between items-center mt-2">
                 <span className="text-sm font-medium text-slate-500">
-                  14 अंक आवश्यक (उदा. 91-2345-6789-0123)
+                  {language === 'mr' ? '१४ अंक आवश्यक (उदा. 91-2345-6789-0123)' : '14 अंक आवश्यक (उदा. 91-2345-6789-0123)'}
                 </span>
                 <button
                   type="button"
                   onClick={fillDemoAbha}
                   className="text-xs font-bold text-teal-700 bg-teal-50 px-3 py-1.5 rounded-lg hover:bg-teal-100 cursor-pointer"
                 >
-                  ⚡ नमूना भरें (Demo Fill)
+                  {language === 'mr' ? '⚡ नमुना भरा (Demo Fill)' : '⚡ नमूना भरें (Demo Fill)'}
                 </button>
               </div>
             </div>
@@ -629,14 +633,14 @@ export const ScreenIdentify: React.FC<ScreenIdentifyProps> = ({ onNext, onBack }
               />
               <div className="flex justify-between items-center mt-2">
                 <span className="text-sm font-medium text-slate-500">
-                  12 अंक (उदा. 2345 6789 0123)
+                  {language === 'mr' ? '१२ अंक आवश्यक (उदा. 2345 6789 0123)' : '12 अंक (उदा. 2345 6789 0123)'}
                 </span>
                 <button
                   type="button"
                   onClick={fillDemoAadhaar}
                   className="text-xs font-bold text-sky-700 bg-sky-50 px-3 py-1.5 rounded-lg hover:bg-sky-100 cursor-pointer"
                 >
-                  ⚡ नमूना भरें (Demo Fill)
+                  {language === 'mr' ? '⚡ नमुना भरा (Demo Fill)' : '⚡ नमूना भरें (Demo Fill)'}
                 </button>
               </div>
             </div>

@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { ScreenLanding } from './features/landing/ScreenLanding'
 import { IdentifyFlow } from './features/identify/IdentifyFlow'
 import { ScreenConverse } from './features/converse/ScreenConverse'
 import { ScreenScan } from './features/scan/ScreenScan'
@@ -14,8 +15,11 @@ export default function App() {
       <PersistentAccessibilityControls />
 
       <Routes>
-        {/* Patient journey */}
-        <Route path="/" element={<IdentifyFlow />} />
+        {/* Landing page — role selection */}
+        <Route path="/" element={<ScreenLanding />} />
+
+        {/* Kiosk patient journey (walk-in OPD) */}
+        <Route path="/kiosk" element={<IdentifyFlow />} />
         <Route path="/converse" element={<ScreenConverse />} />
         <Route path="/scan" element={<ScreenScan />} />
         <Route path="/summary" element={<ScreenSummary />} />
@@ -25,7 +29,7 @@ export default function App() {
         <Route path="/patient" element={<ScreenPatientDashboard />} />
         <Route path="/patient/dashboard" element={<ScreenPatientDashboard />} />
 
-        {/* Physician view */}
+        {/* Physician / Clinician view */}
         <Route path="/clinician" element={<ScreenClinician />} />
         <Route path="/consult" element={<ScreenClinician />} />
         <Route path="/consult/:sessionId" element={<ScreenClinician />} />
