@@ -53,37 +53,6 @@ export const ScreenClinician: React.FC = () => {
 
   // 1. Fetch available patient sessions
   const loadSessions = useCallback(async () => {
-    const fallbackSessions: SessionItem[] = [
-      {
-        id: 'demo-session-101',
-        token_number: 'A-101',
-        department: 'general_medicine',
-        status: 'completed',
-        created_at: new Date().toISOString(),
-        patients: {
-          name: 'Rajesh Kumar',
-          gender: 'Male',
-          dob: '1978-05-12',
-          phone_number: '9876543210',
-          abha_id: '12-3456-7890-1234',
-        },
-      },
-      {
-        id: 'demo-session-102',
-        token_number: 'B-204',
-        department: 'ayush',
-        status: 'completed',
-        created_at: new Date(Date.now() - 3600000).toISOString(),
-        patients: {
-          name: 'Sunita Patil',
-          gender: 'Female',
-          dob: '1985-11-20',
-          phone_number: '9812345678',
-          abha_id: '98-7654-3210-4321',
-        },
-      },
-    ]
-
     try {
       const { data, error } = await supabase
         .from('sessions')
@@ -95,14 +64,9 @@ export const ScreenClinician: React.FC = () => {
         setSessions((data as unknown) as SessionItem[])
         const activeId = selectedSessionId || data[0].id
         setSelectedSessionId(activeId)
-      } else {
-        setSessions(fallbackSessions)
-        if (!selectedSessionId) setSelectedSessionId(fallbackSessions[0].id)
       }
     } catch (err) {
       console.warn('Could not fetch clinician sessions:', err)
-      setSessions(fallbackSessions)
-      if (!selectedSessionId) setSelectedSessionId(fallbackSessions[0].id)
     }
   }, [selectedSessionId])
 

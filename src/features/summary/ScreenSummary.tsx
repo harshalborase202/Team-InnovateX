@@ -8,7 +8,6 @@ import { supabase } from '../../lib/supabase'
 export const ScreenSummary: React.FC = () => {
   const navigate = useNavigate()
   const {
-    t,
     language,
     currentPatient,
     setCurrentPatient,
@@ -112,7 +111,7 @@ export const ScreenSummary: React.FC = () => {
       <KioskHeader
         showBack={false}
         stepNumber={4}
-        stepTitle={t('step4Title')}
+        stepTitle={language === 'hi' ? 'चरण 4: पंजीकरण पूर्ण' : 'Step 4: Check-in Complete'}
       />
 
       <main className="flex-1 flex flex-col items-center justify-center p-4 sm:p-6 max-w-3xl mx-auto w-full text-center">

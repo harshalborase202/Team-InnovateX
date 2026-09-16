@@ -155,32 +155,29 @@ export async function uploadDocumentToStorage(
   const timestamp = Date.now()
   const storagePath = `${sessionId}/${timestamp}_${cleanName}`
 
-  try {
-    // Try upload to Supabase storage bucket
-    const { data, error } = await supabase.storage
-      .from('patient-documents')
-      .upload(storagePath, file, {
-        cacheControl: '3600',
-        upsert: true,
-        contentType: (file as File).type || 'image/jpeg',
-      })
+  // Try upload to Supabase storage bucket
+  const { data, error } = await supabase.storage
+    .from('patient-documents')
+    .upload(storagePath, file, {
+      cacheControl: '3600',
+      upsert: true,
+      contentType: (file as File).type || 'image/jpeg',
+    })
 
-    if (error) {
-      console.warn('Supabase storage upload error:', error)
-    }
+  if (error) {
+    console.warn('Supabase storage upload error:', error)
+    // Fallback: If Storage RLS is pending execution of migration 04,
+    // we still return the deterministic storage path so the kiosk workflow proceeds seamlessly!
+  }
 
-    // Get public URL or preview URL
-    const { data: urlData } = supabase.storage
-      .from('patient-documents')
-      .getPublicUrl(storagePath)
+  // Get public URL or preview URL
+  const { data: urlData } = supabase.storage
+    .from('patient-documents')
+    .getPublicUrl(storagePath)
 
-    return {
-      storagePath: data?.path || storagePath,
-      publicUrl: urlData?.publicUrl,
-    }
-  } catch (err) {
-    console.warn('Supabase storage upload network exception:', err)
-    return { storagePath }
+  return {
+    storagePath: data?.path || storagePath,
+    publicUrl: urlData?.publicUrl,
   }
 }
 
@@ -191,8 +188,8 @@ export async function createDocumentRecord(
   sessionId: string,
   storagePath: string
 ): Promise<PatientDocumentRecord | null> {
-  const defaultFallback: PatientDocumentRecord = {
-    id: `local-doc-${Date.now()}`,
+  // Try inserting with 'unclassified', fallback to 'other' if constraint not yet migrated
+  let insertPayload: Record<string, any> = {
     session_id: sessionId,
     storage_path: storagePath,
     doc_type: 'unclassified',
@@ -201,9 +198,29 @@ export async function createDocumentRecord(
     created_at: new Date().toISOString(),
   }
 
-  try {
-    // Try inserting with 'unclassified', fallback to 'other' if constraint not yet migrated
-    let insertPayload: Record<string, any> = {
+  let { data, error } = await supabase
+    .from('documents')
+    .insert(insertPayload)
+    .select()
+    .single()
+
+  if (error && (error.message.includes('check constraint') || error.code === '23514')) {
+    // If DB check constraint rejects 'unclassified', fall back to 'other'
+    insertPayload.doc_type = 'other'
+    const fallback = await supabase
+      .from('documents')
+      .insert(insertPayload)
+      .select()
+      .single()
+    data = fallback.data
+    error = fallback.error
+  }
+
+  if (error) {
+    console.error('Failed to insert document record:', error)
+    // Local fallback record to ensure kiosk never stalls
+    return {
+      id: `local-doc-${Date.now()}`,
       session_id: sessionId,
       storage_path: storagePath,
       doc_type: 'unclassified',
@@ -211,35 +228,9 @@ export async function createDocumentRecord(
       structured_json: {},
       created_at: new Date().toISOString(),
     }
-
-    let { data, error } = await supabase
-      .from('documents')
-      .insert(insertPayload)
-      .select()
-      .single()
-
-    if (error && (error.message?.includes('check constraint') || error.code === '23514')) {
-      // If DB check constraint rejects 'unclassified', fall back to 'other'
-      insertPayload.doc_type = 'other'
-      const fallback = await supabase
-        .from('documents')
-        .insert(insertPayload)
-        .select()
-        .single()
-      data = fallback.data
-      error = fallback.error
-    }
-
-    if (error || !data) {
-      console.warn('Failed to insert document record, returning local fallback:', error)
-      return defaultFallback
-    }
-
-    return data as PatientDocumentRecord
-  } catch (err) {
-    console.warn('Supabase document insert exception, returning local fallback:', err)
-    return defaultFallback
   }
+
+  return data as PatientDocumentRecord
 }
 
 /**

@@ -45,35 +45,19 @@ export interface ClinicalSummaryRecord {
  * Deterministically assemble clinical data from raw session tables
  */
 export async function assembleClientClinicalSummary(sessionId: string): Promise<StructuredClinicalSummary> {
-  let session: any = null
-  let historyResponses: any[] = []
-  let redFlags: any[] = []
-  let ayushRows: any = null
-  let documents: any[] = []
-
-  try {
-    const [
-      { data: sData },
-      { data: hrData },
-      { data: rfData },
-      { data: ayData },
-      { data: docData },
-    ] = await Promise.all([
-      supabase.from('sessions').select('*, patients(*)').eq('id', sessionId).maybeSingle(),
-      supabase.from('history_responses').select('*').eq('session_id', sessionId).order('captured_at', { ascending: true }),
-      supabase.from('red_flags').select('*').eq('session_id', sessionId),
-      supabase.from('ayush_history').select('*').eq('session_id', sessionId).maybeSingle(),
-      supabase.from('documents').select('*').eq('session_id', sessionId),
-    ])
-
-    session = sData
-    historyResponses = hrData || []
-    redFlags = rfData || []
-    ayushRows = ayData
-    documents = docData || []
-  } catch (err) {
-    console.warn('Supabase clinical data fetch skipped (using local assembler):', err)
-  }
+  const [
+    { data: session },
+    { data: historyResponses },
+    { data: redFlags },
+    { data: ayushRows },
+    { data: documents },
+  ] = await Promise.all([
+    supabase.from('sessions').select('*, patients(*)').eq('id', sessionId).maybeSingle(),
+    supabase.from('history_responses').select('*').eq('session_id', sessionId).order('captured_at', { ascending: true }),
+    supabase.from('red_flags').select('*').eq('session_id', sessionId),
+    supabase.from('ayush_history').select('*').eq('session_id', sessionId).maybeSingle(),
+    supabase.from('documents').select('*').eq('session_id', sessionId),
+  ])
 
   const answers: Record<string, string> = {}
   if (historyResponses) {
@@ -188,36 +172,23 @@ export async function generateAndSaveSummary(sessionId: string): Promise<Clinica
   // 2. Try direct Gemini AI summarization if configured
   if (isGeminiConfigured()) {
     try {
-      let sessionData: any = null
-      let hrData: any[] = []
-      let rfData: any[] = []
-      let docData: any[] = []
-
-      try {
-        const [
-          { data: session },
-          { data: historyResponses },
-          { data: redFlags },
-          { data: documents },
-        ] = await Promise.all([
-          supabase.from('sessions').select('*, patients(*)').eq('id', sessionId).maybeSingle(),
-          supabase.from('history_responses').select('*').eq('session_id', sessionId).order('captured_at', { ascending: true }),
-          supabase.from('red_flags').select('*').eq('session_id', sessionId),
-          supabase.from('documents').select('*').eq('session_id', sessionId),
-        ])
-        sessionData = session
-        hrData = historyResponses || []
-        rfData = redFlags || []
-        docData = documents || []
-      } catch (dbErr) {
-        console.warn('Supabase query error in Gemini summary fetch:', dbErr)
-      }
+      const [
+        { data: session },
+        { data: historyResponses },
+        { data: redFlags },
+        { data: documents },
+      ] = await Promise.all([
+        supabase.from('sessions').select('*, patients(*)').eq('id', sessionId).maybeSingle(),
+        supabase.from('history_responses').select('*').eq('session_id', sessionId).order('captured_at', { ascending: true }),
+        supabase.from('red_flags').select('*').eq('session_id', sessionId),
+        supabase.from('documents').select('*').eq('session_id', sessionId),
+      ])
 
       const geminiSummary = await generateClinicalSummaryWithGemini({
-        patient: sessionData?.patients,
-        historyResponses: hrData,
-        redFlags: rfData,
-        documents: docData,
+        patient: session?.patients,
+        historyResponses: historyResponses || [],
+        redFlags: redFlags || [],
+        documents: documents || [],
       })
 
       if (geminiSummary && geminiSummary.chief_complaint) {
@@ -250,60 +221,37 @@ ${summaryJson.ayush ? `6. AYUSH: Prakriti=${JSON.stringify(summaryJson.ayush.pra
 ४. दवाइयाँ व एलर्जी: ${summaryJson.drug_allergy}
 ${summaryJson.ayush ? `५. आयुष परीक्षण: ${JSON.stringify(summaryJson.ayush.prakriti)}` : ''}`
 
-  let summaryRecord: ClinicalSummaryRecord | null = null
-
-  // 3. Upsert into clinical_summaries table (non-blocking if database fails)
-  try {
-    const { data: record, error: upsertErr } = await supabase
-      .from('clinical_summaries')
-      .upsert({
-        session_id: sessionId,
-        summary_json: summaryJson,
-        summary_text_en: summaryTextEn,
-        summary_text_hi: summaryTextHi,
-        physician_edited: false,
-        pushed_to_his_at: null,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'session_id' })
-      .select()
-      .single()
-
-    if (!upsertErr && record) {
-      summaryRecord = record as ClinicalSummaryRecord
-    }
-  } catch (upsertErr) {
-    console.warn('Failed to upsert clinical_summaries in DB (using local summary record):', upsertErr)
-  }
-
-  if (!summaryRecord) {
-    summaryRecord = {
-      id: `local-summary-${Date.now()}`,
+  // 3. Upsert into clinical_summaries table
+  const { data: record, error: upsertErr } = await supabase
+    .from('clinical_summaries')
+    .upsert({
       session_id: sessionId,
       summary_json: summaryJson,
       summary_text_en: summaryTextEn,
       summary_text_hi: summaryTextHi,
       physician_edited: false,
-      created_at: new Date().toISOString(),
+      pushed_to_his_at: null,
       updated_at: new Date().toISOString(),
-    }
+    }, { onConflict: 'session_id' })
+    .select()
+    .single()
+
+  if (upsertErr) {
+    console.error('Failed to upsert clinical_summaries:', upsertErr)
   }
 
-  // 4. Audit Log (non-blocking)
-  try {
-    await supabase.from('audit_log').insert({
-      session_id: sessionId,
-      actor: 'ai_clinical_summarizer',
-      action: 'SUMMARY_GENERATED',
-      details: {
-        timestamp: new Date().toISOString(),
-        chief_complaint: summaryJson.chief_complaint,
-      },
-    })
-  } catch (auditErr) {
-    console.warn('Audit log bypassed:', auditErr)
-  }
+  // 4. Audit Log
+  await supabase.from('audit_log').insert({
+    session_id: sessionId,
+    actor: 'ai_clinical_summarizer',
+    action: 'SUMMARY_GENERATED',
+    details: {
+      timestamp: new Date().toISOString(),
+      chief_complaint: summaryJson.chief_complaint,
+    },
+  })
 
-  return summaryRecord
+  return record as ClinicalSummaryRecord
 }
 
 /**

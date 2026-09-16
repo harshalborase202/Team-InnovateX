@@ -71,10 +71,7 @@ export const TRANSLATIONS: Record<SupportedLanguage, Record<string, string>> = {
   hi: {
     // Header & Navigation
     appTitle: 'मेडीकियोस्क (MediKiosk)',
-    step1Title: 'Step 1: पहचान और भाषा',
-    step2Title: 'Step 2: स्वास्थ्य बातचीत',
-    step3Title: 'Step 3: पुराने पर्चे व जाँच स्कैन',
-    step4Title: 'Step 4: पंजीकरण पूर्ण',
+    step1Title: 'चरण 1: पहचान और भाषा',
     repeatAudio: 'आवाज़ दोबारा सुनें',
     speakingNow: 'आवाज़ चल रही है...',
     back: 'वापस जाएँ',
@@ -178,9 +175,6 @@ export const TRANSLATIONS: Record<SupportedLanguage, Record<string, string>> = {
     // Header & Navigation
     appTitle: 'MediKiosk',
     step1Title: 'Step 1: Identity & Language',
-    step2Title: 'Step 2: Health Interview',
-    step3Title: 'Step 3: Medical Document Scan',
-    step4Title: 'Step 4: Check-in Complete',
     repeatAudio: 'Replay Audio Instructions',
     speakingNow: 'Playing audio...',
     back: 'Go Back',
@@ -282,10 +276,7 @@ export const TRANSLATIONS: Record<SupportedLanguage, Record<string, string>> = {
 
   mr: {
     appTitle: 'मेडीकियोस्क (MediKiosk)',
-    step1Title: 'Step 1: ओळख आणि भाषा',
-    step2Title: 'Step 2: आरोग्य संवाद',
-    step3Title: 'Step 3: कागदपत्र स्कॅनिंग',
-    step4Title: 'Step 4: नोंदणी पूर्ण',
+    step1Title: 'पायरी १: ओळख आणि भाषा',
     repeatAudio: 'आवाज पुन्हा ऐका',
     speakingNow: 'आवाज सुरू आहे...',
     back: 'मागे जा',
@@ -371,10 +362,7 @@ export const TRANSLATIONS: Record<SupportedLanguage, Record<string, string>> = {
 
   ta: {
     appTitle: 'மெடிகியோஸ்க் (MediKiosk)',
-    step1Title: 'Step 1: அடையாளம் மற்றும் மொழி',
-    step2Title: 'Step 2: சுகாதார நேர்காணல்',
-    step3Title: 'Step 3: ஆவணங்கள் ஸ்கேன்',
-    step4Title: 'Step 4: பதிவு நிறைவடைந்தது',
+    step1Title: 'படி 1: அடையாளம் மற்றும் மொழி',
     repeatAudio: 'குரல் வழிகாட்டலை மீண்டும் கேளுங்கள்',
     speakingNow: 'குரல் ஒலிக்கிறது...',
     back: 'பின்செல்க',
@@ -460,10 +448,7 @@ export const TRANSLATIONS: Record<SupportedLanguage, Record<string, string>> = {
 
   bn: {
     appTitle: 'মেডিকিওস্ক (MediKiosk)',
-    step1Title: 'Step 1: পরিচয় ও ভাষা',
-    step2Title: 'Step 2: স্বাস্থ্য কথোপকথন',
-    step3Title: 'Step 3: প্রেসক্রিপশন ও রিপোর্ট স্ক্যান',
-    step4Title: 'Step 4: রেজিস্ট্রেশন সম্পন্ন',
+    step1Title: 'ধাপ ১: পরিচয় ও ভাষা',
     repeatAudio: 'নির্দেশনা আবার শুনুন',
     speakingNow: 'অডিও চলছে...',
     back: 'ফিরে যান',
@@ -549,10 +534,7 @@ export const TRANSLATIONS: Record<SupportedLanguage, Record<string, string>> = {
 
   te: {
     appTitle: 'మెడికియోస్క్ (MediKiosk)',
-    step1Title: 'Step 1: గుర్తింపు మరియు భాష',
-    step2Title: 'Step 2: ఆరోగ్య సంభాషణ',
-    step3Title: 'Step 3: వైద్య పత్రాల స్కాన్',
-    step4Title: 'Step 4: నమోదు పూర్తయింది',
+    step1Title: 'దశ 1: గుర్తింపు మరియు భాష',
     repeatAudio: 'ఆడియో సూచనలను మళ్లీ వినండి',
     speakingNow: 'ఆడియో వినిపిస్తోంది...',
     back: 'వెనక్కి వెళ్ళండి',

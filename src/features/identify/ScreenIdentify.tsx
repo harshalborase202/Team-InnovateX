@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useKiosk } from '../../context/KioskContext'
 import { supabase } from '../../lib/supabase'
-import { Patient, Session } from '../../types/database'
+import { Patient } from '../../types/database'
 
 interface ScreenIdentifyProps {
   onNext: () => void
@@ -136,172 +136,101 @@ export const ScreenIdentify: React.FC<ScreenIdentifyProps> = ({ onNext, onBack }
     try {
       let patientRecord: Patient | null = null
 
-      // Step 1: Check if patient already exists in Supabase (non-blocking)
-      try {
-        if (patientQueryData.abha_id) {
-          const { data: existing } = await supabase
-            .from('patients')
-            .select('*')
-            .eq('abha_id', patientQueryData.abha_id)
-            .maybeSingle()
-          if (existing) patientRecord = existing
-        } else if (patientQueryData.aadhaar_ref) {
-          const { data: existing } = await supabase
-            .from('patients')
-            .select('*')
-            .eq('aadhaar_ref', patientQueryData.aadhaar_ref)
-            .maybeSingle()
-          if (existing) patientRecord = existing
-        } else if (patientQueryData.phone_number) {
-          const { data: existing } = await supabase
-            .from('patients')
-            .select('*')
-            .eq('phone_number', patientQueryData.phone_number)
-            .maybeSingle()
-          if (existing) patientRecord = existing
-        }
-
-        // Step 2: If not found, attempt inserting new patient record into Supabase
-        if (!patientRecord) {
-          const { data: inserted, error: insertError } = await supabase
-            .from('patients')
-            .insert({
-              name: patientQueryData.name || 'Patient',
-              preferred_language: language,
-              abha_id: patientQueryData.abha_id || null,
-              aadhaar_ref: patientQueryData.aadhaar_ref || null,
-              phone_number: patientQueryData.phone_number || null,
-              dob: patientQueryData.dob || null,
-              gender: patientQueryData.gender || null,
-            })
-            .select()
-            .single()
-
-          if (!insertError && inserted) {
-            patientRecord = inserted
-          }
-        }
-      } catch (dbErr) {
-        console.warn('Supabase patient DB bypass (using local session fallback):', dbErr)
+      // Step 1: Check if patient already exists in Supabase
+      if (patientQueryData.abha_id) {
+        const { data: existing } = await supabase
+          .from('patients')
+          .select('*')
+          .eq('abha_id', patientQueryData.abha_id)
+          .maybeSingle()
+        if (existing) patientRecord = existing
+      } else if (patientQueryData.aadhaar_ref) {
+        const { data: existing } = await supabase
+          .from('patients')
+          .select('*')
+          .eq('aadhaar_ref', patientQueryData.aadhaar_ref)
+          .maybeSingle()
+        if (existing) patientRecord = existing
+      } else if (patientQueryData.phone_number) {
+        const { data: existing } = await supabase
+          .from('patients')
+          .select('*')
+          .eq('phone_number', patientQueryData.phone_number)
+          .maybeSingle()
+        if (existing) patientRecord = existing
       }
 
-      // If Supabase is offline, unreachable, or returning placeholder error, create local patient record
+      // Step 2: If not found, insert new patient record
       if (!patientRecord) {
-        patientRecord = {
-          id: `demo-patient-${Date.now()}`,
-          auth_user_id: null,
-          name: patientQueryData.name || 'Patient',
-          preferred_language: language,
-          abha_id: patientQueryData.abha_id || null,
-          aadhaar_ref: patientQueryData.aadhaar_ref || null,
-          phone_number: patientQueryData.phone_number || null,
-          login_email: null,
-          dob: patientQueryData.dob || null,
-          gender: patientQueryData.gender || null,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        }
-      }
-
-      setCurrentPatient(patientRecord)
-
-      // Step 3: Create a new session (try Supabase first, fallback locally)
-      const tokenPrefix = department === 'ayush' ? 'AYUSH' : 'OPD'
-      const tokenNumber = `${tokenPrefix}-${Math.floor(100 + Math.random() * 900)}`
-      let sessionRecord: Session | null = null
-
-      const activePatientId = patientRecord.id
-
-      try {
-        const { data: sRecord, error: sessionError } = await supabase
-          .from('sessions')
+        const { data: inserted, error: insertError } = await supabase
+          .from('patients')
           .insert({
-            patient_id: activePatientId,
-            kiosk_id: 'KIOSK-OPD-01',
-            department: department || 'general_medicine',
-            token_number: tokenNumber,
-            status: 'identify',
-            started_at: new Date().toISOString(),
+            name: patientQueryData.name || 'Patient',
+            preferred_language: language,
+            abha_id: patientQueryData.abha_id || null,
+            aadhaar_ref: patientQueryData.aadhaar_ref || null,
+            phone_number: patientQueryData.phone_number || null,
+            dob: patientQueryData.dob || null,
+            gender: patientQueryData.gender || null,
           })
           .select()
           .single()
 
-        if (!sessionError && sRecord) {
-          sessionRecord = sRecord
+        if (insertError) {
+          console.error('Patient insert error:', insertError)
+          throw new Error(insertError.message)
         }
-      } catch (sessErr) {
-        console.warn('Supabase session DB bypass (using local session fallback):', sessErr)
+        patientRecord = inserted
       }
 
-      if (!sessionRecord) {
-        sessionRecord = {
-          id: `demo-session-${Date.now()}`,
-          patient_id: activePatientId,
+      if (!patientRecord) {
+        throw new Error('Could not establish patient record')
+      }
+
+      setCurrentPatient(patientRecord)
+
+      // Step 3: Create a new row in sessions with status "identify"
+      const tokenPrefix = department === 'ayush' ? 'AYUSH' : 'OPD'
+      const tokenNumber = `${tokenPrefix}-${Math.floor(100 + Math.random() * 900)}`
+      const { data: sessionRecord, error: sessionError } = await supabase
+        .from('sessions')
+        .insert({
+          patient_id: patientRecord.id,
           kiosk_id: 'KIOSK-OPD-01',
           department: department || 'general_medicine',
           token_number: tokenNumber,
           status: 'identify',
           started_at: new Date().toISOString(),
-          completed_at: null,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        }
+        })
+        .select()
+        .single()
+
+      if (sessionError) {
+        console.error('Session insert error:', sessionError)
+        throw new Error(sessionError.message)
       }
 
       setCurrentSession(sessionRecord)
 
-      // Step 4: Record audit log (non-blocking)
-      try {
-        await supabase.from('audit_log').insert({
-          session_id: sessionRecord.id,
-          actor: 'kiosk_patient',
-          action: 'PATIENT_IDENTIFIED',
-          details: {
-            identification_method: mode,
-            language_selected: language,
-            token_number: tokenNumber,
-          },
-        })
-      } catch (auditErr) {
-        console.warn('Audit log insert bypassed:', auditErr)
-      }
+      // Step 4: Record audit log entry (insert-only)
+      await supabase.from('audit_log').insert({
+        session_id: sessionRecord.id,
+        actor: 'kiosk_patient',
+        action: 'PATIENT_IDENTIFIED',
+        details: {
+          identification_method: mode,
+          language_selected: language,
+          token_number: tokenNumber,
+        },
+      })
 
-      // Proceed to Consent screen
+      // Proceed to Step C (Consent)
       onNext()
     } catch (err: any) {
-      console.error('Submission failed, using complete fallback:', err)
-      // Ultimate fallback: guarantee patient can always check-in
-      const fallbackPatient: Patient = {
-        id: `demo-patient-${Date.now()}`,
-        auth_user_id: null,
-        name: name || 'Patient',
-        preferred_language: language,
-        abha_id: null,
-        aadhaar_ref: null,
-        phone_number: phone || null,
-        login_email: null,
-        dob: null,
-        gender: gender || null,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      }
-      const tokenPrefix = department === 'ayush' ? 'AYUSH' : 'OPD'
-      const tokenNumber = `${tokenPrefix}-${Math.floor(100 + Math.random() * 900)}`
-      const fallbackSession: Session = {
-        id: `demo-session-${Date.now()}`,
-        patient_id: fallbackPatient.id,
-        kiosk_id: 'KIOSK-OPD-01',
-        department: department || 'general_medicine',
-        token_number: tokenNumber,
-        status: 'identify',
-        started_at: new Date().toISOString(),
-        completed_at: null,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      }
-      setCurrentPatient(fallbackPatient)
-      setCurrentSession(fallbackSession)
-      onNext()
+      console.error('Submission failed:', err)
+      setErrorMsg(
+        err.message || 'पंजीकरण में समस्या आई। कृपया पुनः प्रयास करें।'
+      )
     } finally {
       setIsSubmitting(false)
     }
