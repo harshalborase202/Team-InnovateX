@@ -24,6 +24,7 @@ interface ScannedDocItem {
 export const ScreenScan: React.FC = () => {
   const navigate = useNavigate()
   const {
+    t,
     language,
     currentPatient,
     setCurrentPatient,
@@ -428,7 +429,7 @@ export const ScreenScan: React.FC = () => {
         showBack={true}
         onBack={() => navigate('/converse')}
         stepNumber={3}
-        stepTitle={language === 'hi' ? 'चरण 3: पुराने पर्चे व जाँच स्कैन' : 'Step 3: Medical Document Scan'}
+        stepTitle={t('step3Title')}
       />
 
       <main className="flex-1 flex flex-col items-center justify-center p-4 sm:p-6 max-w-4xl mx-auto w-full">

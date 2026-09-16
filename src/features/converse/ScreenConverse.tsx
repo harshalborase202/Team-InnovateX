@@ -14,6 +14,7 @@ import { RedFlagAlert } from './RedFlagAlert'
 export const ScreenConverse: React.FC = () => {
   const navigate = useNavigate()
   const {
+    t,
     language,
     department,
     currentPatient,
@@ -390,7 +391,7 @@ export const ScreenConverse: React.FC = () => {
         showBack={true}
         onBack={() => navigate('/')}
         stepNumber={2}
-        stepTitle={language === 'hi' ? 'चरण 2: स्वास्थ्य बातचीत' : 'Step 2: Health Interview'}
+        stepTitle={t('step2Title')}
       />
 
       {/* ── RED FLAG EMERGENCY SCREEN ─────────────────────────────────── */}

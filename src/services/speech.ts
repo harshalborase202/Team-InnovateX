@@ -19,6 +19,11 @@ class SpeechService {
   constructor() {
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       this.synth = window.speechSynthesis
+      if (this.synth && 'onvoiceschanged' in this.synth) {
+        this.synth.onvoiceschanged = () => {
+          this.synth?.getVoices()
+        }
+      }
     }
   }
 
@@ -92,7 +97,6 @@ class SpeechService {
       })
 
       if (error || !data || !data.audio_base64) {
-        console.warn('speak-text Edge Function unavailable, falling back to Web Speech API:', error)
         this.speakViaWebSpeech(text, langCode, onEnd)
         return
       }
@@ -102,7 +106,7 @@ class SpeechService {
       const audioBlob = new Blob([audioBytes], { type: data.content_type || 'audio/mp3' })
       const audioUrl = URL.createObjectURL(audioBlob)
 
-      // Cache the audio URL (evict oldest if cache is full)
+      // Cache the audio URL
       if (this.audioCache.size >= this.maxCacheSize) {
         const firstKey = this.audioCache.keys().next().value
         if (firstKey) {
@@ -114,8 +118,7 @@ class SpeechService {
       this.audioCache.set(cacheKey, audioUrl)
 
       this.playAudioUrl(audioUrl, onEnd)
-    } catch (err) {
-      console.warn('Server TTS failed, using Web Speech API fallback:', err)
+    } catch {
       this.speakViaWebSpeech(text, langCode, onEnd)
     }
   }
@@ -143,7 +146,6 @@ class SpeechService {
 
     audio.play().catch((err) => {
       console.warn('Audio play() rejected:', err)
-      // Browser autoplay policy may block — fall back to Web Speech
       this.currentAudio = null
       this.notify(false)
       if (onEnd) onEnd()
@@ -163,15 +165,36 @@ class SpeechService {
 
     const utterance = new SpeechSynthesisUtterance(text)
     utterance.lang = langCode
-    utterance.rate = 0.95 // Slightly slower for elderly / low-literacy clarity
+    utterance.rate = 0.92 // Slower rate for clear pronunciation
     utterance.pitch = 1.0
 
-    // Match best available native voice if available
+    // Multi-tier voice selection for Marathi & regional languages
     const voices = this.synth.getVoices?.() || []
     const prefix = langCode.split('-')[0].toLowerCase()
-    const voice = voices.find(
-      (v) => v.lang.toLowerCase() === langCode.toLowerCase() || v.lang.toLowerCase().startsWith(prefix)
-    )
+
+    let voice = voices.find((v) => v.lang.toLowerCase() === langCode.toLowerCase())
+    if (!voice) {
+      voice = voices.find((v) => v.lang.toLowerCase().startsWith(prefix))
+    }
+    if (!voice) {
+      const nameKeywords: Record<string, string[]> = {
+        mr: ['marathi', 'मराठी'],
+        hi: ['hindi', 'हिंदी'],
+        ta: ['tamil', 'தமிழ்'],
+        bn: ['bengali', 'bangla', 'বাংলা'],
+        te: ['telugu', 'తెలుగు'],
+        en: ['english', 'india', 'indian'],
+      }
+      const kwList = nameKeywords[prefix] || []
+      voice = voices.find((v) => kwList.some((kw) => v.name.toLowerCase().includes(kw)))
+    }
+    if (!voice && prefix !== 'en') {
+      voice = voices.find((v) => v.lang.toLowerCase().startsWith('hi') || v.name.toLowerCase().includes('hindi'))
+      if (!voice) {
+        voice = voices.find((v) => v.lang.toLowerCase().includes('en-in') || v.name.toLowerCase().includes('india'))
+      }
+    }
+
     if (voice) {
       utterance.voice = voice
     }
