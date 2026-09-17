@@ -38,6 +38,7 @@ export const ScreenClinician: React.FC = () => {
   const [selectedSessionId, setSelectedSessionId] = useState<string>(paramSessionId || '')
   const [currentSession, setCurrentSession] = useState<SessionItem | null>(null)
   const [scannedDocuments, setScannedDocuments] = useState<any[]>([])
+  const [previewDocUrl, setPreviewDocUrl] = useState<string | null>(null)
 
   // Clinical Summary State
   const [summaryRecord, setSummaryRecord] = useState<ClinicalSummaryRecord | null>(null)
@@ -51,19 +52,54 @@ export const ScreenClinician: React.FC = () => {
   const [isSavingEdit, setIsSavingEdit] = useState<boolean>(false)
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null)
 
+  // Dynamic formatting for Section 9 (Prior Scanned Investigations & Document Extracts)
+  const priorInvestigationsText = React.useMemo(() => {
+    if (scannedDocuments && scannedDocuments.length > 0) {
+      return scannedDocuments
+        .map((doc, idx) => {
+          const s = doc.structured_json || {}
+          const docDate = s.date_on_document || new Date(doc.created_at).toLocaleDateString()
+          const type = (s.doc_type || doc.doc_type || 'Prescription').toUpperCase()
+          const hospital = s.hospital_name ? ` (${s.hospital_name})` : ''
+          const diagnoses = s.diagnoses?.length > 0 ? s.diagnoses.join(', ') : 'None stated'
+          const meds =
+            s.medications?.length > 0
+              ? s.medications.map((m: any) => `${m.name} (${m.dose} - ${m.frequency})`).join('; ')
+              : 'None'
+          const labs =
+            s.lab_results?.length > 0
+              ? s.lab_results.map((l: any) => `${l.test}: ${l.value} ${l.unit || ''} [${l.flag || 'normal'}]`).join('; ')
+              : 'None'
+          const notes = s.doctor_notes ? ` | Advice: ${s.doctor_notes}` : ''
+
+          return `[Doc ${idx + 1}: ${type} - ${docDate}${hospital}]\n  • Diagnoses: ${diagnoses}\n  • Medications: ${meds}\n  • Lab Results: ${labs}${notes}`
+        })
+        .join('\n\n')
+    }
+    return (
+      summaryData?.prior_investigations_summary ||
+      'No prior diagnostic reports or prescription slips presented.'
+    )
+  }, [scannedDocuments, summaryData?.prior_investigations_summary])
+
   // 1. Fetch available patient sessions
   const loadSessions = useCallback(async () => {
     try {
+      // Use anon-friendly query — sessions are publicly readable via kiosk_anon policy
       const { data, error } = await supabase
         .from('sessions')
         .select('id, token_number, department, status, created_at, patients(name, gender, dob, phone_number, abha_id)')
         .order('created_at', { ascending: false })
-        .limit(20)
+        .limit(50)
 
       if (!error && data && data.length > 0) {
         setSessions((data as unknown) as SessionItem[])
-        const activeId = selectedSessionId || data[0].id
-        setSelectedSessionId(activeId)
+        // Only set selectedSessionId if not already set from URL param or existing selection
+        if (!selectedSessionId || !data.find((s: any) => s.id === selectedSessionId)) {
+          setSelectedSessionId(data[0].id)
+        }
+      } else if (error) {
+        console.warn('Could not fetch clinician sessions:', error.message)
       }
     } catch (err) {
       console.warn('Could not fetch clinician sessions:', err)
@@ -108,9 +144,21 @@ export const ScreenClinician: React.FC = () => {
     setSaveSuccessMsg(null)
 
     try {
-      // Find session item
-      const sess = sessions.find((s) => s.id === sessId)
-      if (sess) setCurrentSession(sess)
+      // Find session item in local state first, otherwise query directly
+      let sess = sessions.find((s) => s.id === sessId)
+      if (!sess) {
+        const { data: sessData } = await supabase
+          .from('sessions')
+          .select('id, token_number, department, status, created_at, patients(name, gender, dob, phone_number, abha_id)')
+          .eq('id', sessId)
+          .maybeSingle()
+        if (sessData) {
+          sess = sessData as unknown as SessionItem
+          setCurrentSession(sess)
+        }
+      } else {
+        setCurrentSession(sess)
+      }
 
       // Fetch summary (will generate if missing or incomplete)
       let record = await getSessionSummary(sessId)
@@ -127,14 +175,33 @@ export const ScreenClinician: React.FC = () => {
       }
 
       // Fetch scanned documents for this session
-      const { data: docs } = await supabase
+      // Use direct query — works with both authenticated and anon roles via permissive policies
+      const { data: docs, error: docsError } = await supabase
         .from('documents')
         .select('*')
         .eq('session_id', sessId)
         .order('created_at', { ascending: true })
 
-      if (docs) {
-        setScannedDocuments(docs)
+      if (docsError) {
+        console.warn('Could not fetch documents (RLS may be blocking):', docsError.message)
+        setScannedDocuments([])
+      } else if (docs && docs.length > 0) {
+        const mappedDocs = docs.map((d: any) => {
+          let pubUrl = ''
+          if (d.storage_path) {
+            const { data: urlData } = supabase.storage
+              .from('patient-documents')
+              .getPublicUrl(d.storage_path)
+            pubUrl = urlData?.publicUrl || ''
+          }
+          return {
+            ...d,
+            publicUrl: pubUrl,
+          }
+        })
+        setScannedDocuments(mappedDocs)
+      } else {
+        setScannedDocuments([])
       }
     } catch (err) {
       console.error('Error loading session clinical details:', err)
@@ -821,69 +888,144 @@ export const ScreenClinician: React.FC = () => {
                 </span>
                 <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200">
                   <pre className="text-xs font-mono text-slate-800 whitespace-pre-wrap leading-relaxed">
-                    {summaryData.prior_investigations_summary}
+                    {priorInvestigationsText}
                   </pre>
                 </div>
               </div>
 
               {/* ── 5. CHRONOLOGICAL LIST OF PATIENT'S PRIOR DOCUMENTS ─────── */}
               {scannedDocuments.length > 0 && (
-                <div>
-                  <h4 className="text-sm font-extrabold uppercase text-slate-700 tracking-wider mb-3 flex items-center gap-2">
-                    <span>📑</span>
-                    <span>Scanned Document Artifacts ({scannedDocuments.length})</span>
-                  </h4>
+                <div id="section-scanned-documents-artifacts" className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-extrabold uppercase text-slate-800 tracking-wider flex items-center gap-2">
+                      <span>📑</span>
+                      <span>Scanned Document Artifacts ({scannedDocuments.length})</span>
+                    </h4>
+                    <span className="text-xs font-bold text-teal-700 bg-teal-50 px-2.5 py-1 rounded-lg border border-teal-200">
+                      ✓ Digitized & Verified by AI OCR
+                    </span>
+                  </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {scannedDocuments.map((doc, idx) => {
                       const s = doc.structured_json || {}
                       const meds = s.medications || []
                       const labs = s.lab_results || []
+                      const diagnoses = s.diagnoses || []
+                      const isRx = (s.doc_type || doc.doc_type) === 'prescription'
 
                       return (
                         <div
                           key={doc.id || idx}
-                          className="p-4 rounded-2xl bg-white border-2 border-slate-200 shadow-xs"
+                          id={`card-clinician-doc-${idx}`}
+                          className="p-4 rounded-2xl bg-white border-2 border-teal-200 hover:border-teal-500 transition-all shadow-xs flex flex-col justify-between"
                         >
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="text-xs font-bold uppercase bg-teal-100 text-teal-900 px-2 py-0.5 rounded">
-                              {s.doc_type || doc.doc_type}
-                            </span>
-                            <span className="text-xs font-semibold text-slate-500">
-                              📅 {s.date_on_document || new Date(doc.created_at).toLocaleDateString()}
-                            </span>
+                          <div>
+                            {/* Card Header Badge & Date */}
+                            <div className="flex items-center justify-between mb-2">
+                              <span
+                                className={`text-xs font-extrabold uppercase px-2.5 py-1 rounded-lg border ${
+                                  isRx
+                                    ? 'bg-teal-100 text-teal-950 border-teal-300'
+                                    : 'bg-sky-100 text-sky-950 border-sky-300'
+                                }`}
+                              >
+                                {isRx ? '📄 Prescription' : '🧪 Lab Report'}
+                              </span>
+                              <span className="text-xs font-bold text-slate-500">
+                                📅 {s.date_on_document || new Date(doc.created_at).toLocaleDateString()}
+                              </span>
+                            </div>
+
+                            {/* Hospital Name */}
+                            {s.hospital_name && (
+                              <p className="text-xs font-black text-slate-900 mb-2">
+                                🏥 {s.hospital_name}
+                              </p>
+                            )}
+
+                            {/* Diagnoses Tags */}
+                            {diagnoses.length > 0 && (
+                              <div className="mb-2.5">
+                                <span className="text-[11px] font-bold text-slate-500 block mb-1 uppercase tracking-wider">
+                                  Diagnoses Found:
+                                </span>
+                                <div className="flex flex-wrap gap-1">
+                                  {diagnoses.map((d: string, i: number) => (
+                                    <span
+                                      key={i}
+                                      className="bg-amber-100 text-amber-950 border border-amber-300 text-[11px] font-bold px-2 py-0.5 rounded-md"
+                                    >
+                                      {d}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Medications List */}
+                            {meds.length > 0 && (
+                              <div className="mb-3 text-xs bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+                                <span className="font-bold text-teal-900 block mb-1">
+                                  💊 Prescribed Medications ({meds.length}):
+                                </span>
+                                <ul className="space-y-1">
+                                  {meds.map((m: any, i: number) => (
+                                    <li key={i} className="text-slate-800 font-medium">
+                                      • <strong className="text-slate-900">{m.name}</strong> ({m.dose}) —{' '}
+                                      <span className="text-slate-600">{m.frequency}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+
+                            {/* Lab Findings List */}
+                            {labs.length > 0 && (
+                              <div className="mb-3 text-xs bg-sky-50/60 p-2.5 rounded-xl border border-sky-200">
+                                <span className="font-bold text-sky-900 block mb-1">
+                                  🔬 Laboratory Test Findings ({labs.length}):
+                                </span>
+                                <div className="space-y-1">
+                                  {labs.map((l: any, i: number) => (
+                                    <div
+                                      key={i}
+                                      className="flex items-center justify-between font-mono text-[11px] border-b border-sky-100 pb-0.5 last:border-0"
+                                    >
+                                      <span className="text-slate-800 font-sans font-medium">{l.test}:</span>
+                                      <span
+                                        className={
+                                          l.flag === 'high' || l.flag === 'low'
+                                            ? 'font-bold text-red-700 bg-red-100 px-1.5 py-0.5 rounded'
+                                            : 'font-semibold text-slate-800'
+                                        }
+                                      >
+                                        {l.value} {l.unit} ({l.flag || 'normal'})
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Doctor Advice / Notes */}
+                            {s.doctor_notes && (
+                              <p className="text-xs text-slate-600 italic bg-amber-50/50 p-2 rounded-lg border border-amber-200 mb-2">
+                                💬 <b>Advice:</b> {s.doctor_notes}
+                              </p>
+                            )}
                           </div>
 
-                          {s.hospital_name && (
-                            <p className="text-xs font-bold text-slate-800 mb-2">{s.hospital_name}</p>
-                          )}
-
-                          {meds.length > 0 && (
-                            <div className="mb-2 text-xs">
-                              <span className="font-bold text-slate-500 block">Medications:</span>
-                              <ul className="list-disc list-inside text-slate-800 font-medium">
-                                {meds.map((m: any, i: number) => (
-                                  <li key={i}>
-                                    {m.name} ({m.dose}) — {m.frequency}
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-
-                          {labs.length > 0 && (
-                            <div className="text-xs">
-                              <span className="font-bold text-slate-500 block">Lab Findings:</span>
-                              <div className="space-y-1 mt-1">
-                                {labs.map((l: any, i: number) => (
-                                  <div key={i} className="flex justify-between font-mono text-[11px]">
-                                    <span>{l.test}:</span>
-                                    <span className={l.flag !== 'normal' ? 'font-bold text-red-600' : 'text-slate-800'}>
-                                      {l.value} {l.unit}
-                                    </span>
-                                  </div>
-                                ))}
-                              </div>
+                          {/* Image Thumbnail & View Modal Button */}
+                          {doc.publicUrl && (
+                            <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between">
+                              <button
+                                type="button"
+                                onClick={() => setPreviewDocUrl(doc.publicUrl)}
+                                className="text-xs font-bold text-teal-700 hover:text-teal-900 flex items-center gap-1 cursor-pointer"
+                              >
+                                <span>🖼️ View Original Document Image</span>
+                              </button>
                             </div>
                           )}
                         </div>
@@ -925,6 +1067,34 @@ export const ScreenClinician: React.FC = () => {
           )}
         </div>
       </main>
+
+      {/* ── ORIGINAL DOCUMENT IMAGE PREVIEW MODAL ───────────────────────── */}
+      {previewDocUrl && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-white rounded-3xl p-4 sm:p-6 max-w-3xl w-full shadow-2xl relative flex flex-col max-h-[90vh]">
+            <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-200">
+              <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+                <span>🖼️</span>
+                <span>Original Scanned Document Image</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setPreviewDocUrl(null)}
+                className="text-slate-500 hover:text-slate-900 text-2xl font-bold p-1 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto flex items-center justify-center bg-slate-100 rounded-2xl p-2">
+              <img
+                src={previewDocUrl}
+                alt="Original Scanned Document"
+                className="max-w-full max-h-[70vh] object-contain rounded-xl shadow-md"
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

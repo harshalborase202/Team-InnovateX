@@ -41,6 +41,79 @@ export interface PatientVisitDetail {
   redFlags: any[]
 }
 
+// ====================================================================
+// HELPER: Upsert patient profile row with all available user metadata
+// This ensures phone_number, abha_id, etc. are persisted in patients table
+// because the Supabase auth trigger only saves name+email.
+// ====================================================================
+async function upsertPatientProfile(user: any): Promise<void> {
+  if (!user?.id) return
+
+  const email = user.email || ''
+  const meta = user.user_metadata || {}
+  const name = meta.name || user.name || 'Patient'
+  const phone = meta.phone_number || meta.phone || user.phone_number || null
+  const abha = meta.abha_id || user.abha_id || null
+  const lang = meta.preferred_language || 'hi'
+
+  try {
+    // First check if a row exists by auth_user_id
+    const { data: existing } = await supabase
+      .from('patients')
+      .select('id, phone_number, abha_id')
+      .eq('auth_user_id', user.id)
+      .maybeSingle()
+
+    if (existing) {
+      // Update with new info
+      const updates: Record<string, any> = {
+        name,
+        preferred_language: lang,
+        updated_at: new Date().toISOString(),
+      }
+      if (phone && !existing.phone_number) updates.phone_number = phone
+      if (abha && !existing.abha_id) updates.abha_id = abha
+      if (email) updates.login_email = email
+
+      await supabase.from('patients').update(updates).eq('auth_user_id', user.id)
+    } else {
+      // Try to find by login_email and claim it
+      const { data: byEmail } = await supabase
+        .from('patients')
+        .select('id, auth_user_id')
+        .eq('login_email', email)
+        .maybeSingle()
+
+      if (byEmail && !byEmail.auth_user_id) {
+        // Claim this row
+        await supabase
+          .from('patients')
+          .update({
+            auth_user_id: user.id,
+            name,
+            phone_number: phone || undefined,
+            abha_id: abha || undefined,
+            preferred_language: lang,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', byEmail.id)
+      } else if (!byEmail) {
+        // Create new row
+        await supabase.from('patients').insert({
+          auth_user_id: user.id,
+          login_email: email,
+          name,
+          phone_number: phone || null,
+          abha_id: abha || null,
+          preferred_language: lang,
+        })
+      }
+    }
+  } catch (err) {
+    console.warn('upsertPatientProfile error (non-fatal):', err)
+  }
+}
+
 /**
  * Register a new patient account with Supabase Auth
  */
@@ -107,22 +180,42 @@ export async function registerPatient(params: {
       return { user: null, session: null, error: error.message }
     }
 
-    // Auto-link if session exists
+    // Auto-link if session exists (email auto-confirm enabled)
     if (data.session && data.user) {
+      // Save to localStorage for resilience
       localStorage.setItem('medikiosk_active_patient', JSON.stringify({
         id: data.user.id,
         email: cleanEmail,
         name: name.trim(),
         phone_number: cleanPhone,
         abha_id: cleanAbha,
+        user_metadata: data.user.user_metadata,
       }))
+
+      // Persist full profile to patients table (phone + ABHA)
+      await upsertPatientProfile({
+        id: data.user.id,
+        email: cleanEmail,
+        name: name.trim(),
+        phone_number: cleanPhone,
+        abha_id: cleanAbha,
+        user_metadata: {
+          name: name.trim(),
+          phone_number: cleanPhone,
+          abha_id: cleanAbha,
+          preferred_language: preferredLanguage || 'hi',
+        },
+      })
+
+      // Link past kiosk visits by phone/ABHA
       if (cleanPhone || cleanAbha) {
         await linkPatientAccount(cleanAbha, cleanPhone)
       }
+
       return { user: data.user, session: data.session, error: null }
     }
 
-    // If user was created in Supabase Auth but email confirmation is pending
+    // Email confirmation pending — still persist profile and link
     if (data.user && !data.session) {
       const patientPayload = {
         id: data.user.id,
@@ -137,9 +230,26 @@ export async function registerPatient(params: {
         },
       }
       localStorage.setItem('medikiosk_active_patient', JSON.stringify(patientPayload))
+
+      // Still upsert to patients table as we have the user id
+      await upsertPatientProfile({
+        id: data.user.id,
+        email: cleanEmail,
+        name: name.trim(),
+        phone_number: cleanPhone,
+        abha_id: cleanAbha,
+        user_metadata: {
+          name: name.trim(),
+          phone_number: cleanPhone,
+          abha_id: cleanAbha,
+          preferred_language: preferredLanguage || 'hi',
+        },
+      })
+
       if (cleanPhone || cleanAbha) {
         await linkPatientAccount(cleanAbha, cleanPhone)
       }
+
       return {
         user: patientPayload,
         session: { access_token: 'local_patient_token', user: patientPayload },
@@ -210,6 +320,17 @@ export async function loginPatient(email: string, password: string): Promise<{
 
     if (data.user) {
       localStorage.setItem('medikiosk_active_patient', JSON.stringify(data.user))
+
+      // On successful login, upsert the patient profile to ensure phone/ABHA are persisted
+      await upsertPatientProfile(data.user)
+
+      // Auto-link past kiosk visits by phone/ABHA from user_metadata
+      const meta = data.user.user_metadata || {}
+      const phone = meta.phone_number || meta.phone || null
+      const abha = meta.abha_id || null
+      if (phone || abha) {
+        await linkPatientAccount(abha, phone)
+      }
     }
 
     return { user: data.user, session: data.session, error: null }
@@ -258,17 +379,37 @@ export async function getActivePatientUser(): Promise<{
 
     if (!activeUser) return { user: null, patientProfile: null }
 
+    // Build identity search conditions
+    const conditions: string[] = []
+    if (activeUser.id) conditions.push(`auth_user_id.eq.${activeUser.id}`)
+    const userEmail = activeUser.email || ''
+    if (userEmail) conditions.push(`login_email.eq.${userEmail}`)
+
     // Fetch patient profile linked to this auth user
     let profile: any = null
-    if (activeUser.id) {
+    if (conditions.length > 0) {
       const { data } = await supabase
         .from('patients')
         .select('*')
-        .or(`auth_user_id.eq.${activeUser.id},login_email.eq.${activeUser.email || ''}`)
+        .or(conditions.join(','))
         .order('created_at', { ascending: false })
         .limit(1)
 
       if (data && data.length > 0) profile = data[0]
+    }
+
+    // Merge user_metadata fields into profile for display
+    if (profile) {
+      const meta = activeUser.user_metadata || {}
+      if (!profile.phone_number && (meta.phone_number || meta.phone)) {
+        profile.phone_number = meta.phone_number || meta.phone
+      }
+      if (!profile.abha_id && meta.abha_id) {
+        profile.abha_id = meta.abha_id
+      }
+      if (!profile.name && meta.name) {
+        profile.name = meta.name
+      }
     }
 
     return { user: activeUser, patientProfile: profile || null }
@@ -319,13 +460,14 @@ export async function linkPatientAccount(
 
   // 2. Direct client-side linking fallback
   try {
-    let query = supabase.from('patients').select('id, name, abha_id, phone_number, auth_user_id')
-    if (cleanAbha && cleanPhone) {
-      query = query.or(`abha_id.eq.${cleanAbha},phone_number.eq.${cleanPhone}`)
-    } else if (cleanAbha) {
-      query = query.eq('abha_id', cleanAbha)
-    } else if (cleanPhone) {
-      query = query.eq('phone_number', cleanPhone)
+    let query = supabase.from('patients').select('id, name, abha_id, phone_number, auth_user_id, login_email')
+
+    const orParts: string[] = []
+    if (cleanAbha) orParts.push(`abha_id.eq.${cleanAbha}`)
+    if (cleanPhone) orParts.push(`phone_number.eq.${cleanPhone}`)
+
+    if (orParts.length > 0) {
+      query = query.or(orParts.join(','))
     }
 
     const { data: matchingPatients, error: matchError } = await query
@@ -340,19 +482,22 @@ export async function linkPatientAccount(
 
     let linkedCount = 0
     for (const patient of matchingPatients) {
-      if (!patient.auth_user_id || patient.auth_user_id === userId) {
-        const { error: updateErr } = await supabase
-          .from('patients')
-          .update({
-            auth_user_id: userId,
-            abha_id: cleanAbha || patient.abha_id,
-            phone_number: cleanPhone || patient.phone_number,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', patient.id)
+      // Skip rows already owned by a different user
+      if (patient.auth_user_id && patient.auth_user_id !== userId) continue
 
-        if (!updateErr) linkedCount++
+      const updatePayload: Record<string, any> = {
+        auth_user_id: userId,
+        updated_at: new Date().toISOString(),
       }
+      if (cleanAbha) updatePayload.abha_id = cleanAbha
+      if (cleanPhone) updatePayload.phone_number = cleanPhone
+
+      const { error: updateErr } = await supabase
+        .from('patients')
+        .update(updatePayload)
+        .eq('id', patient.id)
+
+      if (!updateErr) linkedCount++
     }
 
     return {
@@ -376,19 +521,22 @@ export async function getPatientVisitSessions(): Promise<PatientSessionItem[]> {
   if (!user) return []
 
   const userId = user.id
-  const userPhone = user.phone_number || patientProfile?.phone_number || user.user_metadata?.phone_number || null
-  const userAbha = user.abha_id || patientProfile?.abha_id || user.user_metadata?.abha_id || null
+  const meta = user.user_metadata || {}
+  const userPhone = meta.phone_number || meta.phone || patientProfile?.phone_number || user.phone_number || null
+  const userAbha = meta.abha_id || patientProfile?.abha_id || user.abha_id || null
+  const userEmail = user.email || ''
 
-  // 1. Get all patient IDs claimed by this user or matching phone/abha
+  // 1. Get all patient IDs claimed by this user or matching phone/abha/email
+  const orParts: string[] = []
+  if (userId) orParts.push(`auth_user_id.eq.${userId}`)
+  if (userPhone) orParts.push(`phone_number.eq.${userPhone}`)
+  if (userAbha) orParts.push(`abha_id.eq.${userAbha}`)
+  if (userEmail) orParts.push(`login_email.eq.${userEmail}`)
+
   let patientQuery = supabase.from('patients').select('id, name, phone_number, abha_id')
 
-  const orConditions: string[] = []
-  if (userId) orConditions.push(`auth_user_id.eq.${userId}`)
-  if (userPhone) orConditions.push(`phone_number.eq.${userPhone}`)
-  if (userAbha) orConditions.push(`abha_id.eq.${userAbha}`)
-
-  if (orConditions.length > 0) {
-    patientQuery = patientQuery.or(orConditions.join(','))
+  if (orParts.length > 0) {
+    patientQuery = patientQuery.or(orParts.join(','))
   } else {
     patientQuery = patientQuery.eq('auth_user_id', userId)
   }
@@ -436,6 +584,19 @@ export async function getPatientVisitSessions(): Promise<PatientSessionItem[]> {
     let complaint = summaryRow?.chief_complaint
     if (!complaint && summaryRow?.summary_json) {
       complaint = summaryRow.summary_json.chief_complaint
+    }
+
+    // Fallback: query chief complaint from history_responses
+    if (!complaint) {
+      const { data: hrRow } = await supabase
+        .from('history_responses')
+        .select('field_value_json')
+        .eq('session_id', sess.id)
+        .eq('field_key', 'chief_complaint')
+        .maybeSingle()
+      if (hrRow?.field_value_json) {
+        complaint = hrRow.field_value_json.answer || hrRow.field_value_json.option_label || null
+      }
     }
 
     sessionList.push({
@@ -490,7 +651,7 @@ export async function getVisitDetail(sessionId: string): Promise<PatientVisitDet
     .from('history_responses')
     .select('*')
     .eq('session_id', sessionId)
-    .order('turn_order', { ascending: true })
+    .order('captured_at', { ascending: true })
 
   // Red flags
   const { data: redFlags } = await supabase

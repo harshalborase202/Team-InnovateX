@@ -188,33 +188,22 @@ export async function createDocumentRecord(
   sessionId: string,
   storagePath: string
 ): Promise<PatientDocumentRecord | null> {
-  // Try inserting with 'unclassified', fallback to 'other' if constraint not yet migrated
-  let insertPayload: Record<string, any> = {
+  // Use 'other' as initial doc_type — it's accepted by the DB constraint.
+  // After OCR processing, it gets updated to 'prescription' or 'lab_report'.
+  const insertPayload: Record<string, any> = {
     session_id: sessionId,
     storage_path: storagePath,
-    doc_type: 'unclassified',
+    doc_type: 'other',
     ocr_status: 'pending',
     structured_json: {},
     created_at: new Date().toISOString(),
   }
 
-  let { data, error } = await supabase
+  const { data, error } = await supabase
     .from('documents')
     .insert(insertPayload)
     .select()
     .single()
-
-  if (error && (error.message.includes('check constraint') || error.code === '23514')) {
-    // If DB check constraint rejects 'unclassified', fall back to 'other'
-    insertPayload.doc_type = 'other'
-    const fallback = await supabase
-      .from('documents')
-      .insert(insertPayload)
-      .select()
-      .single()
-    data = fallback.data
-    error = fallback.error
-  }
 
   if (error) {
     console.error('Failed to insert document record:', error)
@@ -223,7 +212,7 @@ export async function createDocumentRecord(
       id: `local-doc-${Date.now()}`,
       session_id: sessionId,
       storage_path: storagePath,
-      doc_type: 'unclassified',
+      doc_type: 'other',
       ocr_status: 'pending',
       structured_json: {},
       created_at: new Date().toISOString(),
@@ -308,27 +297,22 @@ export async function processAndSaveOcr(
   // 3. Persist OCR results into public.documents table
   if (documentId && !documentId.startsWith('local-doc-')) {
     try {
-      // Try updating with ocr_status 'done' or 'completed'
-      let updatePayload: Record<string, any> = {
+      // Always use 'completed' — the DB constraint is: ('pending', 'processing', 'completed', 'failed')
+      const updatePayload: Record<string, any> = {
         doc_type: structuredData.doc_type || 'prescription',
         structured_json: structuredData,
-        ocr_status: 'done',
+        ocr_status: 'completed',
         ocr_raw_text: `Document digitized on ${new Date().toLocaleDateString()}. Diagnoses: ${structuredData.diagnoses.join(', ')}. Medications: ${structuredData.medications.map(m => m.name).join(', ')}.`,
         updated_at: new Date().toISOString(),
       }
 
-      let { error: updateError } = await supabase
+      const { error: updateError } = await supabase
         .from('documents')
         .update(updatePayload)
         .eq('id', documentId)
 
-      if (updateError && (updateError.message.includes('check constraint') || updateError.code === '23514')) {
-        // Fallback to 'completed' if 'done' is not in database constraint
-        updatePayload.ocr_status = 'completed'
-        await supabase
-          .from('documents')
-          .update(updatePayload)
-          .eq('id', documentId)
+      if (updateError) {
+        console.warn('Could not update documents table with OCR results:', updateError.message)
       }
     } catch (saveErr) {
       console.warn('Could not update documents table with OCR results:', saveErr)
