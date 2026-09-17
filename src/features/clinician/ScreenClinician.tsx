@@ -9,6 +9,7 @@ import {
   ClinicalSummaryRecord,
 } from '../../services/summaryService'
 import { RxPad } from '../../components/RxPad'
+import { BodyPainMap } from '../../components/BodyPainMap'
 import type { TriageResult } from '../../services/triageEngine'
 
 interface SessionItem {
@@ -56,6 +57,7 @@ export const ScreenClinician: React.FC = () => {
   // RxPad State
   const [showRxPad, setShowRxPad] = useState<boolean>(false)
   const [rxSavedMsg, setRxSavedMsg] = useState<string | null>(null)
+  const [showClinicianBodyMap, setShowClinicianBodyMap] = useState<boolean>(false)
 
   // 1. Fetch available patient sessions
   const loadSessions = useCallback(async () => {
@@ -460,6 +462,18 @@ export const ScreenClinician: React.FC = () => {
             >
               <span className="text-base">℞</span>
               <span>Write Prescription</span>
+            </button>
+
+            {/* ── View Body Map Button ── */}
+            <button
+              id="btn-open-body-map-clinician"
+              type="button"
+              onClick={() => setShowClinicianBodyMap(true)}
+              className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-950 font-extrabold text-xs sm:text-sm border border-amber-300 shadow-xs cursor-pointer transition-colors active:scale-95"
+              title="Open Interactive Body Pain Map"
+            >
+              <span className="text-base">🫀</span>
+              <span>Body Map</span>
             </button>
 
             {/* ── Auto-Triage Badge ── */}
@@ -953,6 +967,40 @@ export const ScreenClinician: React.FC = () => {
           }}
           onClose={() => setShowRxPad(false)}
         />
+      )}
+
+      {/* ── CLINICIAN BODY PAIN MAP MODAL ─────────────────────────────── */}
+      {showClinicianBodyMap && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-2xl w-full max-h-[92vh] overflow-y-auto p-6 relative">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4">
+              <div>
+                <h3 className="text-lg font-black text-slate-900 flex items-center gap-2">
+                  <span>🫀</span>
+                  <span>Interactive Body Pain Map</span>
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Patient: <span className="font-bold text-slate-800">{activePatient?.name || 'Current Patient'}</span> • Token: <span className="font-bold text-slate-800">{activeSessionItem?.token_number}</span>
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowClinicianBodyMap(false)}
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold flex items-center justify-center cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+            <BodyPainMap
+              language="en"
+              onSelectionComplete={(summary, _rawIds) => {
+                setShowClinicianBodyMap(false)
+                setPhysicianNotes((prev) => (prev ? `${prev}\n[Pain Zones: ${summary}]` : `[Pain Zones: ${summary}]`))
+              }}
+              onSkip={() => setShowClinicianBodyMap(false)}
+            />
+          </div>
+        </div>
       )}
     </div>
   )

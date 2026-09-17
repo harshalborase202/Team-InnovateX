@@ -93,6 +93,11 @@ export const ScreenConverse: React.FC = () => {
       const response = await getNextInterviewQuestion(sessionId, currentHist, language, activeDept)
       setCurrentTurn(response)
 
+      // Auto-open body map if the AI reaches the pain location question
+      if (response.field_key === 'socrates_site') {
+        setShowBodyMap(true)
+      }
+
       // Announce the question aloud in selected language
       const audioToPlay = response.question_localized || response.question
       setScreenAudio(audioToPlay)
@@ -569,31 +574,38 @@ export const ScreenConverse: React.FC = () => {
             ))}
           </div>
 
-          {/* ── BODY PAIN MAP TOGGLE — visible for pain/location questions ── */}
-          {!loadingNext && currentTurn && (
-            currentTurn.field_key === 'chief_complaint' ||
-            currentTurn.field_key === 'pain_location' ||
-            currentTurn.field_key === 'symptom_location'
-          ) && (
+          {/* ── BODY PAIN MAP TOGGLE — available across interview turns, especially for pain/symptom localization ── */}
+          {!loadingNext && currentTurn &&
+            currentTurn.field_key !== 'interview_completed' &&
+            currentTurn.field_key !== 'ready_for_scan' && (
             <div className="w-full mb-4">
               {!showBodyMap ? (
                 <button
                   id="btn-open-body-map"
                   type="button"
                   onClick={() => setShowBodyMap(true)}
-                  className="w-full py-3.5 px-4 rounded-2xl bg-amber-50 border-2 border-amber-300 text-amber-900 font-bold text-base hover:bg-amber-100 flex items-center justify-center gap-3 cursor-pointer transition-colors shadow-xs"
+                  className={`w-full py-3.5 px-4 rounded-2xl border-2 font-bold text-base flex items-center justify-center gap-3 cursor-pointer transition-all shadow-xs ${
+                    currentTurn.field_key === 'socrates_site' || currentTurn.field_key === 'chief_complaint'
+                      ? 'bg-amber-50 border-amber-400 text-amber-950 hover:bg-amber-100 ring-4 ring-amber-100'
+                      : 'bg-amber-50/80 border-amber-300 text-amber-900 hover:bg-amber-100'
+                  }`}
                 >
                   <span className="text-2xl">🫀</span>
                   <span>
                     {language === 'mr'
-                      ? 'शरीरावर दुखणाऱ्या जागा दाखवा (Body Map)'
+                      ? 'शरीरावर दुखणाऱ्या जागा दाखवा / निवडा (Body Map)'
                       : language === 'hi'
-                      ? 'शरीर पर दर्द की जगह दिखाएँ (Body Map)'
-                      : 'Show pain on body diagram (Body Map)'}
+                      ? 'शरीर पर दर्द की जगह दिखाएँ / चुनें (Body Map)'
+                      : 'Show/Select Pain on Body Diagram (Body Map)'}
                   </span>
+                  {(currentTurn.field_key === 'socrates_site' || currentTurn.field_key === 'chief_complaint') && (
+                    <span className="text-xs bg-amber-200 text-amber-900 font-extrabold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                      {language === 'mr' ? 'शिफारस' : language === 'hi' ? 'सुझाव' : 'Recommended'}
+                    </span>
+                  )}
                 </button>
               ) : (
-                <div className="w-full bg-white rounded-3xl border-2 border-amber-200 p-5 shadow-lg">
+                <div className="w-full bg-white rounded-3xl border-2 border-amber-300 p-5 shadow-lg">
                   <BodyPainMap
                     language={language}
                     onSelectionComplete={handleBodyMapComplete}
