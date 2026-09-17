@@ -13,10 +13,10 @@ interface ScreenLanguageProps {
 export const ScreenLanguage: React.FC<ScreenLanguageProps> = ({ onNext }) => {
   const { language, setLanguage, setScreenAudio } = useKiosk()
 
-  // On initial mount, announce the language selection prompt in Hindi & English
+  // On initial mount, announce the language selection prompt in Hindi, Marathi & English
   useEffect(() => {
     const welcomeText =
-      'नमस्ते। कृपया अपनी पसंदीदा भाषा चुनें। Please choose your preferred language.'
+      'नमस्ते। कृपया अपनी पसंदीदा भाषा चुनें। नमस्कार. कृपया आपली भाषा निवडा. Please choose your preferred language.'
     setScreenAudio(welcomeText)
   }, [setScreenAudio])
 

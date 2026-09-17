@@ -55,8 +55,40 @@
     user-select: none;          /* kiosk — prevent text selection */
   }
 
-  /* Large, easy-to-read base font size for tablet/kiosk */
-  html { font-size: 18px; }
+  /* Large, easy-to-read base font size for tablet/kiosk with dynamic scaling */
+  html,
+  html[data-text-size="normal"],
+  html.text-size-normal {
+    font-size: 18px;
+  }
+
+  html[data-text-size="large"],
+  html.text-size-large {
+    font-size: 22px;
+  }
+
+  html[data-text-size="extra-large"],
+  html.text-size-extra-large {
+    font-size: 26px;
+  }
+
+  /* Universal minimum 48x48px touch targets for interactive elements */
+  button,
+  [role="button"],
+  input[type="button"],
+  input[type="submit"],
+  input[type="reset"],
+  select {
+    min-height: 48px;
+    min-width: 48px;
+  }
+
+  /* Universal high-visibility focus states for keyboard / switch-access users */
+  :focus-visible {
+    outline: 3px solid #0f766e !important;
+    outline-offset: 3px !important;
+    box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.25) !important;
+  }
 }
 
 /* ── Utility classes used across screens ───────────────────────────── */
@@ -102,3 +134,164 @@
            font-bold text-sm;
   }
 }
+
+/* ── High Contrast Mode Theme (WCAG AAA >= 7:1) ────────────────────── */
+html.high-contrast {
+  --color-primary: #facc15;
+  --color-primary-light: #422006;
+  --color-primary-dark: #fef08a;
+  --color-accent: #38bdf8;
+  --color-accent-light: #082f49;
+  --color-surface: #000000;
+  --color-card: #0c0c0c;
+  --color-border: #facc15;
+  --color-text: #ffffff;
+  --color-muted: #f1f5f9;
+  background-color: #000000 !important;
+  color: #ffffff !important;
+}
+
+html.high-contrast body,
+html.high-contrast #root {
+  background-color: #000000 !important;
+  color: #ffffff !important;
+}
+
+/* Container & Surface Overrides */
+html.high-contrast .bg-white,
+html.high-contrast .bg-sky-50,
+html.high-contrast .bg-sky-50\/50,
+html.high-contrast .bg-slate-50,
+html.high-contrast .bg-slate-100,
+html.high-contrast .bg-teal-50,
+html.high-contrast .bg-teal-50\/40,
+html.high-contrast .bg-teal-50\/50,
+html.high-contrast .bg-teal-50\/60,
+html.high-contrast .bg-teal-100,
+html.high-contrast .bg-emerald-50,
+html.high-contrast .bg-emerald-100,
+html.high-contrast .bg-amber-50,
+html.high-contrast .bg-amber-100 {
+  background-color: #0d0d0d !important;
+  color: #ffffff !important;
+  border-color: #facc15 !important;
+}
+
+/* Borders in High Contrast */
+html.high-contrast .border-teal-100,
+html.high-contrast .border-teal-200,
+html.high-contrast .border-teal-300,
+html.high-contrast .border-teal-400,
+html.high-contrast .border-teal-500,
+html.high-contrast .border-teal-600,
+html.high-contrast .border-sky-100,
+html.high-contrast .border-sky-200,
+html.high-contrast .border-sky-300,
+html.high-contrast .border-slate-100,
+html.high-contrast .border-slate-200,
+html.high-contrast .border-slate-300,
+html.high-contrast .border-slate-400 {
+  border-color: #facc15 !important;
+}
+
+/* Text Overrides for Maximum Readability */
+html.high-contrast .text-slate-900,
+html.high-contrast .text-slate-800,
+html.high-contrast .text-slate-700,
+html.high-contrast .text-slate-600,
+html.high-contrast .text-slate-500,
+html.high-contrast .text-teal-950,
+html.high-contrast .text-teal-900,
+html.high-contrast .text-teal-800,
+html.high-contrast .text-teal-700 {
+  color: #ffffff !important;
+}
+
+html.high-contrast h1,
+html.high-contrast h2,
+html.high-contrast h3,
+html.high-contrast h4 {
+  color: #facc15 !important;
+}
+
+/* Buttons in High Contrast */
+html.high-contrast button,
+html.high-contrast [role="button"] {
+  border: 2px solid #facc15 !important;
+}
+
+html.high-contrast .btn-primary,
+html.high-contrast .bg-teal-700,
+html.high-contrast .bg-teal-800,
+html.high-contrast .bg-teal-900 {
+  background-color: #000000 !important;
+  color: #facc15 !important;
+  border: 3px solid #facc15 !important;
+}
+
+html.high-contrast .btn-ghost {
+  background-color: #000000 !important;
+  color: #ffffff !important;
+  border: 2px solid #ffffff !important;
+}
+
+html.high-contrast .btn-accent {
+  background-color: #facc15 !important;
+  color: #000000 !important;
+  border: 3px solid #ffffff !important;
+}
+
+/* Inputs & Form Controls in High Contrast */
+html.high-contrast input,
+html.high-contrast select,
+html.high-contrast textarea {
+  background-color: #000000 !important;
+  color: #ffffff !important;
+  border: 2px solid #facc15 !important;
+}
+
+html.high-contrast input::placeholder,
+html.high-contrast textarea::placeholder {
+  color: #94a3b8 !important;
+}
+
+/* High Contrast Focus State */
+html.high-contrast :focus-visible {
+  outline: 4px solid #facc15 !important;
+  outline-offset: 4px !important;
+  box-shadow: 0 0 0 6px #000000 !important;
+}
+
+/* Modals & Dialogs in High Contrast */
+html.high-contrast [role="dialog"] > div,
+html.high-contrast .shadow-2xl {
+  background-color: #0a0a0a !important;
+  border: 3px solid #facc15 !important;
+}
+
+/* ── Responsive & Extra Large Text Overflow Resilience ─────────────── */
+html[data-text-size="extra-large"] body,
+html[data-text-size="large"] body {
+  overflow-x: hidden;
+}
+
+/* Ensure ample bottom clearance so floating Call for Help button never overlaps card content */
+main {
+  padding-bottom: 6.5rem;
+}
+
+html[data-text-size="large"] main {
+  padding-bottom: 7.5rem !important;
+}
+
+html[data-text-size="extra-large"] main {
+  padding-bottom: 9rem !important;
+}
+
+/* Ensure long text wraps nicely and never overflows cards */
+h1, h2, h3, h4, h5, p, span, div {
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+

@@ -104,15 +104,193 @@ function evaluateRedFlags(history: ConversationTurn[]): { red_flag: boolean; rea
   return { red_flag: false, reason: null, severity: null }
 }
 
-// Swappable LLM Decision Architecture
-// If OPENAI_API_KEY or other model key is set in environment, this delegates to the LLM.
-// Otherwise, it utilizes the clinical SOCRATES and HPI rule-engine.
+// ═══════════════════════════════════════════════════════════════════════════
+// Gemini 2.5 Flash — Clinical Interview LLM Integration
+// Uses Google Gemini API with structured JSON output for reliable kiosk UX.
+// Falls back to the deterministic clinical engine if API is unavailable.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const LANGUAGE_NAMES: Record<string, string> = {
+  hi: 'Hindi (हिन्दी)',
+  en: 'English',
+  mr: 'Marathi (मराठी)',
+  ta: 'Tamil (தமிழ்)',
+  bn: 'Bengali (বাংলা)',
+  te: 'Telugu (తెలుగు)',
+}
+
+function buildClinicalSystemPrompt(language: string, department: string, turnCount: number): string {
+  const langName = LANGUAGE_NAMES[language] || 'Hindi'
+  const isAyush = department === 'ayush' || department.includes('ayush')
+
+  return `You are MediKiosk AI, a clinical history-taking assistant deployed on a hospital OPD self-service kiosk in India.
+Your patients are often elderly, low-literacy individuals. You must be empathetic, clear, and concise.
+
+## CLINICAL FRAMEWORKS
+${isAyush ? `### AYUSH / Ayurvedic Interview
+Follow this order: Chief Complaint → Prakriti (body constitution) → Vikriti (current doshic imbalance) → Agni (digestive fire) → Koshtha (bowel nature) → Ahara-Vihara (diet & routine).
+Total target: 6 questions.` : `### For PAIN complaints, follow SOCRATES:
+S - Site (Where is the pain?)
+O - Onset (When did it start? Sudden or gradual?)
+C - Character (What does it feel like? Sharp/dull/burning/cramping?)
+R - Radiation (Does it spread anywhere?)
+A - Associated symptoms (Fever, vomiting, weakness?)
+T - Timing/Duration (Constant or intermittent? How long?)
+E - Exacerbating/relieving factors (What makes it better/worse?)
+S - Severity (Mild/moderate/severe on a 1-10 scale)
+
+### For NON-PAIN complaints, follow standard HPI:
+1. Chief Complaint
+2. Duration & Onset
+3. Progression (worsening / same / improving)
+4. Associated symptoms
+5. Past Medical History (DM, HTN, Asthma, Heart disease, Thyroid, TB)
+6. Drug & Allergy History (current medications, known drug allergies)
+7. Family History (hereditary diseases in parents/siblings)
+8. Personal History (smoking, alcohol, tobacco, diet)
+9. Brief Review of Systems (CVS, Respiratory, GI, CNS)
+Total target: 8-10 questions.`}
+
+## RED FLAG DETECTION
+If the patient's answers suggest ANY of these, immediately set red_flag=true with appropriate severity:
+- Chest pain + breathlessness/sweating → "critical" (Acute Coronary Syndrome)
+- Sudden worst headache of life → "critical" (Subarachnoid hemorrhage)
+- Facial droop + arm weakness + speech difficulty → "critical" (Stroke)
+- Blood in vomit or cough → "high" (Active hemorrhage)
+- Severe abdominal pain + rigidity → "high" (Acute abdomen)
+- High fever + altered consciousness → "high" (Meningitis/Sepsis)
+
+## OUTPUT RULES
+- Generate exactly ONE next question per call.
+- "question" must be in clear, simple English.
+- "question_localized" must be the same question translated into ${langName}, written in the native script. Use simple, everyday language that an elderly villager would understand.
+- "field_key" must be a descriptive snake_case key (e.g., "socrates_site", "hpi_duration", "past_medical_history").
+- "options" must contain 2-5 short, tap-friendly choices. Each option has "label" (English), "value" (snake_case identifier), and "label_localized" (${langName} with an emoji prefix).
+- "allow_free_voice" should be true for open-ended questions, false for final/completion screens.
+- "progress" should reflect current question number and estimated total.
+- Set "is_complete" to true ONLY when you have gathered sufficient clinical history (all relevant framework sections covered).
+- If is_complete is true, the question should be a thank-you message and options should contain a single "Proceed to Report Scanning" option.
+
+The patient has answered ${turnCount} question(s) so far. Review their history and generate the next logical clinical question.`
+}
+
+// Gemini API response schema for structured JSON output
+const INTERVIEW_RESPONSE_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    question: { type: 'STRING', description: 'The next clinical question in English' },
+    question_localized: { type: 'STRING', description: 'The same question translated into the patient language' },
+    field_key: { type: 'STRING', description: 'A snake_case field identifier for this question' },
+    options: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          label: { type: 'STRING' },
+          value: { type: 'STRING' },
+          label_localized: { type: 'STRING' },
+        },
+        required: ['label', 'value', 'label_localized'],
+      },
+    },
+    allow_free_voice: { type: 'BOOLEAN' },
+    progress: {
+      type: 'OBJECT',
+      properties: {
+        current: { type: 'INTEGER' },
+        total: { type: 'INTEGER' },
+      },
+      required: ['current', 'total'],
+    },
+    is_complete: { type: 'BOOLEAN' },
+    red_flag: { type: 'BOOLEAN' },
+    red_flag_reason: { type: 'STRING', nullable: true },
+    severity: { type: 'STRING', nullable: true, enum: ['critical', 'high', 'medium'] },
+  },
+  required: [
+    'question', 'question_localized', 'field_key', 'options',
+    'allow_free_voice', 'progress', 'is_complete', 'red_flag',
+    'red_flag_reason', 'severity',
+  ],
+}
+
+async function callGeminiModel(
+  apiKey: string,
+  history: ConversationTurn[],
+  language: string,
+  department: string
+): Promise<InterviewResponse | null> {
+  const systemPrompt = buildClinicalSystemPrompt(language, department, history.length)
+
+  const userContent = history.length > 0
+    ? `Patient interview history so far:\n${JSON.stringify(history, null, 2)}\n\nLanguage: ${language}\nDepartment: ${department}\n\nGenerate the next clinical question.`
+    : `This is a new patient session. Language: ${language}, Department: ${department}.\nGenerate the FIRST clinical question (Chief Complaint).`
+
+  const requestBody = {
+    contents: [
+      {
+        role: 'user',
+        parts: [{ text: userContent }],
+      },
+    ],
+    systemInstruction: {
+      parts: [{ text: systemPrompt }],
+    },
+    generationConfig: {
+      temperature: 0.2,
+      topP: 0.8,
+      topK: 40,
+      maxOutputTokens: 1024,
+      responseMimeType: 'application/json',
+      responseSchema: INTERVIEW_RESPONSE_SCHEMA,
+    },
+  }
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(requestBody),
+  })
+
+  if (!res.ok) {
+    const errText = await res.text()
+    console.error(`Gemini API error (${res.status}):`, errText)
+    return null
+  }
+
+  const data = await res.json()
+  const textContent = data?.candidates?.[0]?.content?.parts?.[0]?.text
+  if (!textContent) {
+    console.error('Gemini returned no text content:', JSON.stringify(data))
+    return null
+  }
+
+  const parsed = JSON.parse(textContent)
+
+  // Ensure all required fields exist with defaults
+  return {
+    question: parsed.question || 'What is bothering you today?',
+    question_localized: parsed.question_localized || parsed.question || '',
+    field_key: parsed.field_key || `q_${history.length + 1}`,
+    options: Array.isArray(parsed.options) ? parsed.options : [],
+    allow_free_voice: parsed.allow_free_voice !== false,
+    progress: parsed.progress || { current: history.length + 1, total: 10 },
+    is_complete: !!parsed.is_complete,
+    red_flag: !!parsed.red_flag,
+    red_flag_reason: parsed.red_flag_reason || null,
+    severity: parsed.severity || null,
+  } as InterviewResponse
+}
+
+// Main decision function: Gemini first, then deterministic fallback
 async function decideNextQuestion(
   history: ConversationTurn[],
   language: string = 'hi',
   department: string = 'general_medicine'
 ): Promise<InterviewResponse> {
-  // First check red flags on the running answers
+  // First check red flags on the running answers (fast, no API call needed)
   const redFlagCheck = evaluateRedFlags(history)
   if (redFlagCheck.red_flag) {
     return {
@@ -129,53 +307,19 @@ async function decideNextQuestion(
     }
   }
 
-  // If external LLM API key is configured in Supabase Secrets, call it here:
-  const openAiKey = Deno.env.get('OPENAI_API_KEY')
-  if (openAiKey) {
+  // If Gemini API key is configured in Supabase Secrets, use real LLM
+  const geminiKey = Deno.env.get('GEMINI_API_KEY')
+  if (geminiKey) {
     try {
-      const llmResult = await callLlmModel(openAiKey, history, language)
+      const llmResult = await callGeminiModel(geminiKey, history, language, department)
       if (llmResult) return llmResult
     } catch (err) {
-      console.warn('LLM call failed, falling back to clinical engine:', err)
+      console.warn('Gemini API call failed, falling back to deterministic clinical engine:', err)
     }
   }
 
   // Core Deterministic Clinical Reasoning Engine (SOCRATES + HPI + AYUSH)
   return runClinicalDecisionTree(history, language, department)
-}
-
-// Placeholder for swappable LLM provider (e.g. OpenAI / Claude / Gemini)
-async function callLlmModel(
-  apiKey: string,
-  history: ConversationTurn[],
-  language: string
-): Promise<InterviewResponse | null> {
-  const systemPrompt = `You are MediKiosk AI Clinical Interviewer for an Indian hospital OPD kiosk.
-Follow SOCRATES for pain and standard HPI + PMH + Allergies otherwise.
-Generate the next single question in English and translated into ${language}.
-Output strictly JSON matching the specified schema with 2-5 short tap options.`
-
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'gpt-4o-mini',
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: JSON.stringify({ history, language }) },
-      ],
-      temperature: 0.2,
-    }),
-  })
-
-  if (!res.ok) return null
-  const data = await res.json()
-  const parsed = JSON.parse(data.choices[0].message.content)
-  return parsed as InterviewResponse
 }
 
 // Clinical Decision Tree (SOCRATES, General HPI & AYUSH)

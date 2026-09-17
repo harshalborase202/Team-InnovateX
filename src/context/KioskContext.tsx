@@ -7,6 +7,8 @@ import {
 import { speechService } from '../services/speech'
 import { Patient, Session } from '../types/database'
 
+export type TextSize = 'normal' | 'large' | 'extra-large'
+
 interface KioskContextType {
   language: SupportedLanguage
   setLanguage: (lang: SupportedLanguage) => void
@@ -22,6 +24,19 @@ interface KioskContextType {
   stopAudio: () => void
   replayAudio: () => void
   setScreenAudio: (text: string) => void
+
+  // Accessibility Settings
+  textSize: TextSize
+  setTextSize: (size: TextSize) => void
+  highContrast: boolean
+  setHighContrast: (enabled: boolean) => void
+  isSettingsOpen: boolean
+  setIsSettingsOpen: (open: boolean) => void
+  isHelpModalOpen: boolean
+  setIsHelpModalOpen: (open: boolean) => void
+  callForHelp: () => void
+  isRedFlagActive: boolean
+  setIsRedFlagActive: (active: boolean) => void
 }
 
 const KioskContext = createContext<KioskContextType | null>(null)
@@ -133,6 +148,54 @@ export const KioskProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     localStorage.setItem('medikiosk_department', dept)
   }, [])
 
+  // ── Accessibility State ──
+  const [textSize, setTextSizeState] = useState<TextSize>(() => {
+    const saved = localStorage.getItem('medikiosk_text_size') as TextSize
+    return saved === 'large' || saved === 'extra-large' ? saved : 'normal'
+  })
+
+  const [highContrast, setHighContrastState] = useState<boolean>(() => {
+    return localStorage.getItem('medikiosk_high_contrast') === 'true'
+  })
+
+  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false)
+  const [isHelpModalOpen, setIsHelpModalOpen] = useState<boolean>(false)
+  const [isRedFlagActive, setIsRedFlagActive] = useState<boolean>(false)
+
+  const setTextSize = useCallback((size: TextSize) => {
+    setTextSizeState(size)
+    localStorage.setItem('medikiosk_text_size', size)
+  }, [])
+
+  const setHighContrast = useCallback((enabled: boolean) => {
+    setHighContrastState(enabled)
+    localStorage.setItem('medikiosk_high_contrast', String(enabled))
+  }, [])
+
+  // Apply text size to root HTML element
+  useEffect(() => {
+    const root = document.documentElement
+    root.setAttribute('data-text-size', textSize)
+    root.classList.remove('text-size-normal', 'text-size-large', 'text-size-extra-large')
+    root.classList.add(`text-size-${textSize}`)
+  }, [textSize])
+
+  // Apply high contrast class to root HTML element
+  useEffect(() => {
+    const root = document.documentElement
+    if (highContrast) {
+      root.classList.add('high-contrast')
+    } else {
+      root.classList.remove('high-contrast')
+    }
+  }, [highContrast])
+
+  const callForHelp = useCallback(() => {
+    setIsHelpModalOpen(true)
+    const alertVoice = t('helpAudioNotice') || 'Hospital staff member has been alerted. Please remain seated, an assistant is on their way.'
+    playAudio(alertVoice)
+  }, [t, playAudio])
+
   return (
     <KioskContext.Provider
       value={{
@@ -150,6 +213,17 @@ export const KioskProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         stopAudio,
         replayAudio,
         setScreenAudio,
+        textSize,
+        setTextSize,
+        highContrast,
+        setHighContrast,
+        isSettingsOpen,
+        setIsSettingsOpen,
+        isHelpModalOpen,
+        setIsHelpModalOpen,
+        callForHelp,
+        isRedFlagActive,
+        setIsRedFlagActive,
       }}
     >
       {children}

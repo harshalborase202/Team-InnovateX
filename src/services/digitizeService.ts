@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase'
+import { isGeminiConfigured, digitizeDocumentWithGemini } from './geminiClient'
 
 export interface MedicationItem {
   name: string
@@ -240,9 +241,30 @@ export async function processAndSaveOcr(
   sessionId: string,
   storagePath: string,
   filename?: string,
-  docIndex: number = 0
+  docIndex: number = 0,
+  imageFile?: File | Blob
 ): Promise<StructuredDocumentJson> {
   let structuredData: StructuredDocumentJson | null = null
+
+  // Convert image file to base64 if provided (for real Gemini Vision OCR)
+  let imageBase64: string | undefined
+  if (imageFile) {
+    try {
+      imageBase64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onloadend = () => {
+          const result = reader.result as string
+          // Remove data URI prefix (e.g. "data:image/jpeg;base64,")
+          const base64 = result.split(',')[1] || result
+          resolve(base64)
+        }
+        reader.onerror = reject
+        reader.readAsDataURL(imageFile)
+      })
+    } catch (err) {
+      console.warn('Failed to convert image to base64:', err)
+    }
+  }
 
   // 1. Try remote Supabase Edge Function first
   try {
@@ -251,6 +273,7 @@ export async function processAndSaveOcr(
         document_id: documentId,
         session_id: sessionId,
         storage_path: storagePath,
+        image_base64: imageBase64,
         filename,
       },
     })
@@ -262,7 +285,20 @@ export async function processAndSaveOcr(
     console.warn('Edge Function digitize-document call skipped/failed, using local AI digitizer:', fnErr)
   }
 
-  // 2. Client-side OCR fallback
+  // 2. Direct Gemini Vision OCR
+  if (!structuredData && imageBase64 && isGeminiConfigured()) {
+    try {
+      const mimeType = (imageFile as File)?.type || 'image/jpeg'
+      const visionResult = await digitizeDocumentWithGemini(imageBase64, mimeType)
+      if (visionResult && visionResult.doc_type) {
+        structuredData = visionResult as StructuredDocumentJson
+      }
+    } catch (visionErr) {
+      console.warn('Direct Gemini Vision OCR failed, using fallback parser:', visionErr)
+    }
+  }
+
+  // 3. Client-side deterministic OCR fallback
   if (!structuredData) {
     // Small realistic simulation delay
     await new Promise((res) => setTimeout(res, 500))
