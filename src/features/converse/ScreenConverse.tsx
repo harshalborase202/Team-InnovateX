@@ -11,6 +11,7 @@ import { speechRecognitionService } from '../../services/speechRecognition'
 import { supabase } from '../../lib/supabase'
 import { RedFlagAlert } from './RedFlagAlert'
 import { BodyPainMap } from '../../components/BodyPainMap'
+import { detectSpecialty } from '../../services/triageEngine'
 
 export const ScreenConverse: React.FC = () => {
   const navigate = useNavigate()
@@ -277,6 +278,42 @@ export const ScreenConverse: React.FC = () => {
       })()
     }
 
+    // ── AUTO-TRIAGE: Detect specialty from Q1 (chief_complaint) ──────────
+    if (currentTurn.field_key === 'chief_complaint' && sessionId) {
+      ;(async () => {
+        try {
+          const dept = currentSession?.department || activeDepartment || 'general_medicine'
+          const triageResult = detectSpecialty(answerText.trim(), dept)
+          // Persist routing to sessions.metadata so ScreenSummary can read it
+          await supabase
+            .from('sessions')
+            .update({
+              metadata: {
+                routing: {
+                  specialty: triageResult.specialty,
+                  specialtyMr: triageResult.specialtyMr,
+                  specialtyHi: triageResult.specialtyHi,
+                  room: triageResult.room,
+                  roomMr: triageResult.roomMr,
+                  roomHi: triageResult.roomHi,
+                  doctor: triageResult.doctor,
+                  icon: triageResult.icon,
+                  urgencyColor: triageResult.urgencyColor,
+                  urgencyTextColor: triageResult.urgencyTextColor,
+                  estimatedWaitMinutes: triageResult.estimatedWaitMinutes,
+                  isEmergency: triageResult.isEmergency,
+                  triaged_at: new Date().toISOString(),
+                },
+              },
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', sessionId)
+        } catch (triageErr) {
+          console.warn('Triage routing write error (non-fatal):', triageErr)
+        }
+      })()
+    }
+
     // Check if the answer triggers an immediate red flag
     const lowerAns = answerText.toLowerCase()
     if (
@@ -408,9 +445,9 @@ export const ScreenConverse: React.FC = () => {
         stepNumber={2}
         stepTitle={
           language === 'mr'
-            ? 'पायरी २: आरोग्य संवाद'
+            ? 'Step 2: आरोग्य संवाद'
             : language === 'hi'
-            ? 'चरण 2: स्वास्थ्य बातचीत'
+            ? 'Step 2: स्वास्थ्य बातचीत'
             : 'Step 2: Health Interview'
         }
       />

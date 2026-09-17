@@ -276,7 +276,7 @@ export const TRANSLATIONS: Record<SupportedLanguage, Record<string, string>> = {
 
   mr: {
     appTitle: 'मेडीकियोस्क (MediKiosk)',
-    step1Title: 'पायरी १: ओळख आणि भाषा',
+    step1Title: 'Step 1: ओळख आणि भाषा',
     repeatAudio: 'आवाज पुन्हा ऐका',
     speakingNow: 'आवाज सुरू आहे...',
     back: 'मागे जा',

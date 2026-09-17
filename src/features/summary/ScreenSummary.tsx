@@ -5,6 +5,7 @@ import { KioskHeader } from '../../components/KioskHeader'
 import { generateAndSaveSummary } from '../../services/summaryService'
 import { supabase } from '../../lib/supabase'
 import { OpdTokenReceipt } from '../../components/OpdTokenReceipt'
+import { detectSpecialty, TriageResult } from '../../services/triageEngine'
 
 export const ScreenSummary: React.FC = () => {
   const navigate = useNavigate()
@@ -21,6 +22,7 @@ export const ScreenSummary: React.FC = () => {
   const [tokenNumber, setTokenNumber] = useState<string>('OPD-101')
   const [departmentName, setDepartmentName] = useState<string>('General OPD')
   const [showReceipt, setShowReceipt] = useState(false)
+  const [triage, setTriage] = useState<TriageResult | null>(null)
   const initialTriggerDone = useRef(false)
 
   // Calming audio confirmation on screen load
@@ -61,8 +63,12 @@ export const ScreenSummary: React.FC = () => {
 
       if (activeSession) {
         setTokenNumber(activeSession.token_number || 'OPD-101')
+
+        const dept = activeSession.department || 'general_medicine'
+        const isAyush = dept === 'ayush'
+
         setDepartmentName(
-          activeSession.department === 'ayush'
+          isAyush
             ? language === 'mr'
               ? 'आयुष (आयुर्वेद) ओपीडी'
               : language === 'hi'
@@ -74,6 +80,16 @@ export const ScreenSummary: React.FC = () => {
             ? 'सामान्य चिकित्सा ओपीडी'
             : 'General Medicine OPD'
         )
+
+        // ── Read triage routing from session.metadata (written by ScreenConverse after Q1)
+        const savedRouting = (activeSession.metadata as any)?.routing
+        if (savedRouting && savedRouting.room) {
+          setTriage(savedRouting as TriageResult)
+        } else {
+          // Fallback: detect from department if interview wasn't fully completed
+          const fallbackTriage = detectSpecialty('', dept)
+          setTriage(fallbackTriage)
+        }
 
         // 1. Trigger Edge Function generate-summary
         try {
@@ -121,9 +137,9 @@ export const ScreenSummary: React.FC = () => {
         stepNumber={4}
         stepTitle={
           language === 'mr'
-            ? 'पायरी ४: नोंदणी पूर्ण'
+            ? 'Step 4: नोंदणी पूर्ण'
             : language === 'hi'
-            ? 'चरण 4: पंजीकरण पूर्ण'
+            ? 'Step 4: पंजीकरण पूर्ण'
             : 'Step 4: Check-in Complete'
         }
       />
@@ -194,23 +210,57 @@ export const ScreenSummary: React.FC = () => {
               </span>
             </div>
 
+            {/* Department Badge (colored by specialty) */}
             <div className="flex items-center justify-between text-sm sm:text-base">
               <span className="text-slate-500 font-semibold">
                 {language === 'mr' ? 'ओपीडी विभाग' : language === 'hi' ? 'ओपीडी विभाग' : 'Department'}:
               </span>
-              <span className="font-bold text-teal-800 bg-teal-50 px-3 py-1 rounded-xl text-xs sm:text-sm border border-teal-200">
-                {departmentName}
+              <span className={`font-bold px-3 py-1 rounded-xl text-xs sm:text-sm border ${
+                triage ? `${triage.urgencyColor} ${triage.urgencyTextColor} border-current/20` : 'bg-teal-50 text-teal-800 border-teal-200'
+              }`}>
+                {triage
+                  ? language === 'mr' ? triage.specialtyMr : language === 'hi' ? triage.specialtyHi : triage.specialty
+                  : departmentName}
               </span>
             </div>
 
+            {/* Assigned Room */}
             <div className="flex items-center justify-between text-sm sm:text-base">
               <span className="text-slate-500 font-semibold">
                 {language === 'mr' ? 'कक्ष / रूम नंबर' : language === 'hi' ? 'कक्ष / रूम नंबर' : 'Assigned Room'}:
               </span>
               <span className="font-bold text-emerald-900 bg-emerald-50 px-3 py-1 rounded-xl text-xs sm:text-sm border border-emerald-200">
-                {language === 'mr' ? 'खोली क्र. ४ • डॉ. शर्मा' : language === 'hi' ? 'कमरा नं. ४ • डॉ. शर्मा' : 'Room No. 4 • Dr. Sharma'}
+                {triage
+                  ? language === 'mr' ? triage.roomMr : language === 'hi' ? triage.roomHi : triage.room
+                  : language === 'mr' ? 'खोली क्र. ४ • डॉ. शर्मा' : language === 'hi' ? 'कमरा नं. ४ • डॉ. शर्मा' : 'Room No. 4 • Dr. Sharma'}
               </span>
             </div>
+
+            {/* Doctor Name */}
+            <div className="flex items-center justify-between text-sm sm:text-base">
+              <span className="text-slate-500 font-semibold">
+                {language === 'mr' ? 'डॉक्टर' : language === 'hi' ? 'डॉक्टर' : 'Doctor'}:
+              </span>
+              <span className="font-bold text-slate-800 text-xs sm:text-sm">
+                {triage ? triage.doctor : 'Dr. S. Sharma, MD'}
+              </span>
+            </div>
+
+            {/* Estimated Wait */}
+            {triage && (
+              <div className="flex items-center justify-between text-sm sm:text-base">
+                <span className="text-slate-500 font-semibold">
+                  {language === 'mr' ? 'अंदाजित प्रतीक्षा' : language === 'hi' ? 'अनुमानित प्रतीक्षा' : 'Est. Wait Time'}:
+                </span>
+                <span className={`font-extrabold text-xs sm:text-sm px-3 py-1 rounded-xl ${
+                  triage.isEmergency ? 'bg-red-100 text-red-800 animate-pulse' : 'bg-amber-50 text-amber-800 border border-amber-200'
+                }`}>
+                  {triage.isEmergency
+                    ? language === 'mr' ? '🚨 तात्काळ लक्ष आवश्यक' : language === 'hi' ? '🚨 तत्काल ध्यान आवश्यक' : '🚨 Urgent — See Staff Now'
+                    : `~${triage.estimatedWaitMinutes} min`}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Calming footer note inside ticket */}
@@ -267,10 +317,20 @@ export const ScreenSummary: React.FC = () => {
           <OpdTokenReceipt
             tokenNumber={tokenNumber}
             patientName={currentPatient?.name || (language === 'mr' ? 'नोंदणीकृत रुग्ण' : 'Walk-in Patient')}
-            departmentName={departmentName}
-            roomInfo={language === 'mr' ? 'खोली क्र. ४ • डॉ. शर्मा' : language === 'hi' ? 'कमरा नं. ४ • डॉ. शर्मा' : 'Room No. 4 • Dr. Sharma'}
+            departmentName={
+              triage
+                ? language === 'mr' ? triage.specialtyMr : language === 'hi' ? triage.specialtyHi : triage.specialty
+                : departmentName
+            }
+            roomInfo={
+              triage
+                ? `${language === 'mr' ? triage.roomMr : language === 'hi' ? triage.roomHi : triage.room} • ${triage.doctor}`
+                : language === 'mr' ? 'खोली क्र. ४ • डॉ. शर्मा' : language === 'hi' ? 'कमरा नं. ४ • डॉ. शर्मा' : 'Room No. 4 • Dr. Sharma'
+            }
             sessionDate={new Date().toLocaleString(language === 'mr' ? 'mr-IN' : language === 'hi' ? 'hi-IN' : 'en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
             language={language}
+            estimatedWaitMinutes={triage?.estimatedWaitMinutes}
+            isEmergency={triage?.isEmergency}
             onClose={() => setShowReceipt(false)}
           />
         )}

@@ -430,7 +430,7 @@ export const ScreenScan: React.FC = () => {
         stepNumber={3}
         stepTitle={
           language === 'mr'
-            ? 'पायरी ३: जुने रिपोर्ट व औषधपत्रिका स्कॅन'
+            ? 'Step 3: जुने रिपोर्ट व औषधपत्रिका स्कॅन'
             : language === 'hi'
             ? 'चरण 3: पुराने पर्चे व जाँच स्कैन'
             : 'Step 3: Medical Document Scan'
@@ -827,7 +827,7 @@ export const ScreenScan: React.FC = () => {
               >
                 <span>
                   {language === 'mr'
-                    ? 'पुढील पायरी: नोंदणी सारांश पहा'
+                    ? 'Step 3 पूर्ण: नोंदणी सारांश पहा'
                     : language === 'hi'
                     ? 'अगला चरण: डॉक्टर सारांश देखें'
                     : 'Continue to Summary'}

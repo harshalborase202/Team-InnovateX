@@ -7,6 +7,8 @@ interface OpdTokenReceiptProps {
   roomInfo: string
   sessionDate: string
   language: 'en' | 'hi' | 'mr' | string
+  estimatedWaitMinutes?: number
+  isEmergency?: boolean
   onClose: () => void
 }
 
@@ -17,6 +19,8 @@ export const OpdTokenReceipt: React.FC<OpdTokenReceiptProps> = ({
   roomInfo,
   sessionDate,
   language,
+  estimatedWaitMinutes,
+  isEmergency,
   onClose,
 }) => {
   const receiptRef = useRef<HTMLDivElement>(null)
@@ -194,6 +198,8 @@ export const OpdTokenReceipt: React.FC<OpdTokenReceiptProps> = ({
         : 'Assigned Room',
     dateLabel:
       language === 'mr' ? 'दिनांक व वेळ' : language === 'hi' ? 'दिनांक और समय' : 'Date & Time',
+    waitLabel:
+      language === 'mr' ? 'अंदाजित प्रतीक्षा वेळ' : language === 'hi' ? 'अनुमानित प्रतीक्षा समय' : 'Est. Wait Time',
     footerNote:
       language === 'mr'
         ? 'स्क्रीनवर आपला टोकन नंबर दिसल्यावर डॉक्टरांच्या कक्षात जा. कृपया ही पावती जपून ठेवा.'
@@ -305,6 +311,15 @@ export const OpdTokenReceipt: React.FC<OpdTokenReceiptProps> = ({
                 { label: lbl.deptLabel, value: departmentName, badge: true },
                 { label: lbl.roomLabel, value: roomInfo, badge: true },
                 { label: lbl.dateLabel, value: sessionDate, badge: false },
+                ...(estimatedWaitMinutes != null
+                  ? [{
+                      label: lbl.waitLabel,
+                      value: isEmergency
+                        ? (language === 'mr' ? '🚨 तात्काळ आवश्यक' : language === 'hi' ? '🚨 तत्काल आवश्यक' : '🚨 Urgent')
+                        : `~${estimatedWaitMinutes} min`,
+                      badge: true,
+                    }]
+                  : []),
               ].map(({ label, value, badge }) => (
                 <div
                   key={label}

@@ -9,6 +9,7 @@ import {
   ClinicalSummaryRecord,
 } from '../../services/summaryService'
 import { RxPad } from '../../components/RxPad'
+import type { TriageResult } from '../../services/triageEngine'
 
 interface SessionItem {
   id: string
@@ -327,6 +328,8 @@ export const ScreenClinician: React.FC = () => {
   const redFlags = summaryData?.red_flags || []
   const hasRedFlags = redFlags.length > 0
   const isAyushDept = activeSessionItem?.department === 'ayush'
+  // Auto-triage routing badge (written by ScreenConverse after Q1)
+  const triageRouting: TriageResult | null = (activeSessionItem as any)?.metadata?.routing ?? null
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-100 text-slate-900">
@@ -458,6 +461,23 @@ export const ScreenClinician: React.FC = () => {
               <span className="text-base">℞</span>
               <span>Write Prescription</span>
             </button>
+
+            {/* ── Auto-Triage Badge ── */}
+            {triageRouting && (
+              <span
+                className={`inline-flex items-center gap-1.5 text-xs font-extrabold px-3 py-1.5 rounded-xl border ${
+                  triageRouting.isEmergency
+                    ? 'bg-red-100 text-red-900 border-red-300 animate-pulse'
+                    : `${triageRouting.urgencyColor} ${triageRouting.urgencyTextColor} border-current/20`
+                }`}
+                title={`AI Auto-Triaged at ${new Date(triageRouting.triaged_at ?? '').toLocaleTimeString()}`}
+              >
+                <span>🦠 Auto-Triage:</span>
+                <span>{triageRouting.room}</span>
+                <span>•</span>
+                <span>{triageRouting.specialty}</span>
+              </span>
+            )}
           </div>
         )}
 
