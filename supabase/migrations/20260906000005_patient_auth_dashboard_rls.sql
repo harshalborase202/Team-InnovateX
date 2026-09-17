@@ -17,7 +17,6 @@ AS $$
 BEGIN
   -- Auto-confirm user so they can sign in immediately without waiting for SMTP email
   NEW.email_confirmed_at := COALESCE(NEW.email_confirmed_at, now());
-  NEW.confirmed_at := COALESCE(NEW.confirmed_at, now());
   RETURN NEW;
 END;
 $$;
@@ -29,8 +28,7 @@ CREATE TRIGGER on_auth_user_created_confirm
 
 -- Also confirm any pending users already registered
 UPDATE auth.users
-SET email_confirmed_at = COALESCE(email_confirmed_at, now()),
-    confirmed_at = COALESCE(confirmed_at, now())
+SET email_confirmed_at = COALESCE(email_confirmed_at, now())
 WHERE email_confirmed_at IS NULL;
 
 -- 2. Auto-linking auth trigger on auth.users insert

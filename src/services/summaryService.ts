@@ -66,7 +66,12 @@ export async function assembleClientClinicalSummary(sessionId: string): Promise<
   }
 
   // Chief complaint
-  const chiefComplaint = answers['chief_complaint'] || 'General OPD consultation'
+  const chiefComplaint =
+    answers['chief_complaint'] ||
+    answers['initial_complaint'] ||
+    answers['complaint'] ||
+    (historyResponses && historyResponses[0]?.field_value_json?.answer) ||
+    'General OPD consultation'
 
   // HPI
   const hpiPoints: string[] = []
@@ -80,10 +85,27 @@ export async function assembleClientClinicalSummary(sessionId: string): Promise<
   if (answers['socrates_radiation']) hpiPoints.push(`Radiation: ${answers['socrates_radiation']}`)
   if (answers['socrates_severity']) hpiPoints.push(`Severity: ${answers['socrates_severity']}`)
   if (answers['socrates_associated']) hpiPoints.push(`Associated: ${answers['socrates_associated']}`)
+
+  // Also include any other captured Q&A responses in HPI
+  if (historyResponses && historyResponses.length > 0) {
+    historyResponses.forEach((hr: any) => {
+      const k = hr.field_key
+      const q = hr.field_value_json?.question_localized || hr.field_value_json?.question || k
+      const a = hr.field_value_json?.answer || ''
+      if (
+        a &&
+        !k.startsWith('ayush_') &&
+        !['chief_complaint', 'socrates_site', 'socrates_onset', 'socrates_character', 'socrates_radiation', 'socrates_severity', 'socrates_associated'].includes(k)
+      ) {
+        hpiPoints.push(`${q}: ${a}`)
+      }
+    })
+  }
+
   const hpi = hpiPoints.length > 0 ? hpiPoints.join('; ') : `Patient presents with ${chiefComplaint}.`
 
   // Past Medical & Surgical
-  const pastMedical = answers['past_medical_history'] || 'No chronic past medical or surgical illness reported.'
+  const pastMedical = answers['past_medical_history'] || answers['past_history'] || 'No chronic past medical or surgical illness reported.'
 
   // Drug & Allergy
   const drugAllergy = answers['regular_meds'] || answers['drug_and_allergy'] || 'No active routine medicines or known allergies.'
@@ -153,7 +175,9 @@ export async function assembleClientClinicalSummary(sessionId: string): Promise<
  * Generate, persist, and return the clinical summary
  */
 export async function generateAndSaveSummary(sessionId: string): Promise<ClinicalSummaryRecord | null> {
-  // 1. Try remote Edge Function
+  if (!sessionId) return null
+
+  // 1. Try remote Edge Function if available
   try {
     const { data, error } = await supabase.functions.invoke('generate-summary', {
       body: { session_id: sessionId },
@@ -200,8 +224,18 @@ ${summaryJson.ayush ? `५. आयुष परीक्षण: ${JSON.stringify
     .select()
     .single()
 
-  if (upsertErr) {
-    console.error('Failed to upsert clinical_summaries:', upsertErr)
+  if (upsertErr || !record) {
+    console.warn('Could not upsert clinical_summaries row directly, returning assembled record object:', upsertErr)
+    return {
+      id: `summary-${sessionId}`,
+      session_id: sessionId,
+      summary_json: summaryJson,
+      summary_text_en: summaryTextEn,
+      summary_text_hi: summaryTextHi,
+      physician_edited: false,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }
   }
 
   // 4. Audit Log
@@ -222,18 +256,24 @@ ${summaryJson.ayush ? `५. आयुष परीक्षण: ${JSON.stringify
  * Fetch clinical summary for a session
  */
 export async function getSessionSummary(sessionId: string): Promise<ClinicalSummaryRecord | null> {
-  const { data, error } = await supabase
-    .from('clinical_summaries')
-    .select('*')
-    .eq('session_id', sessionId)
-    .maybeSingle()
+  if (!sessionId) return null
 
-  if (error || !data) {
-    // If not yet generated, generate it now
-    return generateAndSaveSummary(sessionId)
+  try {
+    const { data, error } = await supabase
+      .from('clinical_summaries')
+      .select('*')
+      .eq('session_id', sessionId)
+      .maybeSingle()
+
+    if (!error && data && data.summary_json && data.summary_json.chief_complaint) {
+      return data as ClinicalSummaryRecord
+    }
+  } catch (err) {
+    console.warn('Error querying clinical_summaries:', err)
   }
 
-  return data as ClinicalSummaryRecord
+  // If missing or incomplete in DB, generate and return it now!
+  return generateAndSaveSummary(sessionId)
 }
 
 /**

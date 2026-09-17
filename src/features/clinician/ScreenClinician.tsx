@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
+import { useKiosk } from '../../context/KioskContext'
 import {
   getSessionSummary,
   savePhysicianSummaryEdit,
@@ -20,6 +21,7 @@ interface SessionItem {
 export const ScreenClinician: React.FC = () => {
   const { sessionId: paramSessionId } = useParams<{ sessionId?: string }>()
   const navigate = useNavigate()
+  const { t, language, setScreenAudio, replayAudio, isSpeaking, setIsSettingsOpen } = useKiosk()
 
   // Authentication State
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
@@ -74,6 +76,31 @@ export const ScreenClinician: React.FC = () => {
     }
   }, [isAuthenticated, loadSessions])
 
+  // Multi-lingual UI localization helper
+  const locDoc = useCallback(
+    (texts: { en: string; hi: string; mr: string; ta?: string; bn?: string; te?: string }) => {
+      const target = texts[language]
+      if (target) return target
+      if (language === 'mr') return texts.mr
+      if (language === 'hi') return texts.hi
+      return texts.en
+    },
+    [language]
+  )
+
+  // Accessibility screen audio announcement
+  useEffect(() => {
+    const clinicianPrompt = locDoc({
+      en: 'Doctor consultation portal. Select a patient session from the queue to review clinical summary and scanned documents.',
+      hi: 'डॉक्टर परामर्श पोर्टल। मरीज़ों की सूची से टोकन चुनें और तैयार नैदानिक सारांश व पर्चे देखें।',
+      mr: 'डॉक्टर सल्ला मसलत पोर्टल. रुग्णांच्या यादीतून टोकन निवडा आणि क्लिनिकल सारांश पहा.',
+      ta: 'மருத்துவர் கலந்தாய்வு நுழைவாயில். நோயாளியின் டோக்கனைத் தேர்ந்தெடுக்கவும்.',
+      bn: 'ডাক্তার পরামর্শ পোর্টাল। ক্লিনিকাল সারসংক্ষেপ দেখতে রোগীর টোকেন নির্বাচন করুন।',
+      te: 'వైద్యుల సంప్రదింపు పోర్టల్. క్లినికల్ సారాంశాన్ని సమీక్షించడానికి రోగి టోకెన్‌ను ఎంచుకోండి.',
+    })
+    setScreenAudio(clinicianPrompt)
+  }, [language, locDoc, setScreenAudio])
+
   // 2. Fetch clinical summary & scanned documents when selectedSessionId changes
   const loadSessionDetails = useCallback(async (sessId: string) => {
     if (!sessId) return
@@ -85,9 +112,14 @@ export const ScreenClinician: React.FC = () => {
       const sess = sessions.find((s) => s.id === sessId)
       if (sess) setCurrentSession(sess)
 
-      // Fetch summary
-      const record = await getSessionSummary(sessId)
-      if (record) {
+      // Fetch summary (will generate if missing or incomplete)
+      let record = await getSessionSummary(sessId)
+      if (!record || !record.summary_json || !record.summary_json.chief_complaint) {
+        const { generateAndSaveSummary } = await import('../../services/summaryService')
+        record = await generateAndSaveSummary(sessId)
+      }
+
+      if (record && record.summary_json) {
         setSummaryRecord(record)
         setSummaryData(record.summary_json)
         setEditedSummary(JSON.parse(JSON.stringify(record.summary_json)))
@@ -195,17 +227,48 @@ export const ScreenClinician: React.FC = () => {
   // ── 1. LOGIN SCREEN ────────────────────────────────────────────────
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-900 text-slate-100 p-4">
-        <div className="w-full max-w-md bg-slate-800 border-2 border-slate-700 rounded-3xl p-8 shadow-2xl">
-          <div className="flex items-center gap-3 mb-6 pb-4 border-b border-slate-700">
-            <div className="w-12 h-12 rounded-2xl bg-teal-600 text-white flex items-center justify-center text-2xl font-bold">
-              🩺
-            </div>
-            <div>
-              <h2 className="text-2xl font-extrabold text-white">Clinician Portal</h2>
-              <p className="text-xs text-slate-400">Hospital OPD Physician Dashboard</p>
-            </div>
+      <div className="min-h-screen flex flex-col bg-slate-900 text-slate-100">
+        {/* Clinician Login Top Header */}
+        <header className="w-full bg-slate-800/90 border-b border-slate-700 px-4 sm:px-8 py-3 flex items-center justify-between sticky top-0 z-30">
+          <div className="flex items-center gap-2.5">
+            <span className="text-xl">🩺</span>
+            <span className="font-extrabold text-sm sm:text-base text-white tracking-tight">
+              MediKiosk EHR • Clinician Portal
+            </span>
           </div>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <button
+              id="btn-clinician-login-settings"
+              onClick={() => setIsSettingsOpen(true)}
+              type="button"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-extrabold bg-slate-700 hover:bg-slate-600 text-teal-300 border border-teal-500 cursor-pointer min-h-[44px] shadow-xs active:scale-95"
+              aria-label={t('openSettings')}
+              title={t('openSettings')}
+            >
+              <span role="img" aria-hidden="true">⚙️</span>
+              <span className="font-extrabold">{t('settings')}</span>
+            </button>
+            <button
+              onClick={() => navigate('/kiosk')}
+              type="button"
+              className="text-xs font-bold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 px-3 py-2 rounded-xl border border-slate-600 cursor-pointer min-h-[44px]"
+            >
+              ← OPD Kiosk
+            </button>
+          </div>
+        </header>
+
+        <div className="flex-1 flex flex-col items-center justify-center p-4">
+          <div className="w-full max-w-md bg-slate-800 border-2 border-slate-700 rounded-3xl p-8 shadow-2xl">
+            <div className="flex items-center gap-3 mb-6 pb-4 border-b border-slate-700">
+              <div className="w-12 h-12 rounded-2xl bg-teal-600 text-white flex items-center justify-center text-2xl font-bold">
+                🩺
+              </div>
+              <div>
+                <h2 className="text-2xl font-extrabold text-white">Clinician Portal</h2>
+                <p className="text-xs text-slate-400">Hospital OPD Physician Dashboard</p>
+              </div>
+            </div>
 
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
@@ -262,14 +325,15 @@ export const ScreenClinician: React.FC = () => {
               <span>Quick Demo Clinician Access (1-Click)</span>
             </button>
             <button
-              onClick={() => navigate('/')}
+              onClick={() => navigate('/kiosk')}
               className="text-xs text-slate-400 hover:text-slate-200 mt-4 underline cursor-pointer"
             >
-              ← Back to Patient Kiosk
+              ← Back to OPD Kiosk
             </button>
           </div>
         </div>
       </div>
+    </div>
     )
   }
 
@@ -299,17 +363,50 @@ export const ScreenClinician: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
           <button
-            onClick={() => navigate('/')}
-            className="text-xs font-bold text-slate-300 hover:text-white bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700 cursor-pointer"
+            id="btn-clinician-replay-audio"
+            onClick={replayAudio}
+            type="button"
+            className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer min-h-[48px] min-w-[48px] ${
+              isSpeaking
+                ? 'bg-amber-400 text-amber-950 border-amber-500 animate-pulse'
+                : 'bg-teal-900/60 text-teal-200 border-teal-700 hover:bg-teal-800'
+            }`}
+            aria-label={t('repeatAudio')}
+            title={t('repeatAudio')}
           >
-            ← Open Kiosk
+            <span role="img" aria-hidden="true">{isSpeaking ? '🔊' : '🔈'}</span>
+            <span className="hidden sm:inline">{isSpeaking ? t('speakingNow') : t('repeatAudio')}</span>
+          </button>
+
+          {/* Sugamyata / Accessibility Settings Button */}
+          <button
+            id="btn-clinician-settings"
+            onClick={() => setIsSettingsOpen(true)}
+            type="button"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-extrabold bg-slate-800 hover:bg-slate-700 text-teal-300 border border-teal-500 cursor-pointer min-h-[48px] shadow-xs active:scale-95"
+            aria-label={t('openSettings')}
+            title={t('openSettings')}
+          >
+            <span role="img" aria-hidden="true">⚙️</span>
+            <span className="font-extrabold">{t('settings')}</span>
+          </button>
+
+          <button
+            onClick={() => navigate('/kiosk')}
+            type="button"
+            className="text-xs font-bold text-slate-300 hover:text-white bg-slate-800 px-3 py-2 rounded-xl border border-slate-700 cursor-pointer min-h-[48px]"
+            aria-label="Return to patient kiosk"
+          >
+            ← OPD Kiosk
           </button>
           <button
             id="btn-clinician-logout"
             onClick={handleLogout}
-            className="text-xs font-bold text-red-300 hover:text-red-100 bg-red-950/60 px-3 py-1.5 rounded-lg border border-red-800 cursor-pointer"
+            type="button"
+            className="text-xs font-bold text-red-300 hover:text-red-100 bg-red-950/60 px-3 py-2 rounded-xl border border-red-800 cursor-pointer min-h-[48px]"
+            aria-label="Log out of clinician portal"
           >
             Log Out
           </button>
@@ -484,15 +581,38 @@ export const ScreenClinician: React.FC = () => {
               <p className="font-bold">Loading patient clinical record...</p>
             </div>
           ) : !summaryData ? (
-            <div className="p-12 text-center text-slate-500">
-              <p className="font-bold">No clinical summary generated yet for this session.</p>
+            <div className="p-12 text-center text-slate-500 flex flex-col items-center gap-3">
+              <span className="text-4xl mb-1">📋</span>
+              <p className="font-bold text-lg text-slate-700">No clinical summary generated yet for this session.</p>
+              <p className="text-xs text-slate-500 max-w-md">
+                Click below to aggregate history responses, scanned documents, and AYUSH assessment into a structured EHR summary.
+              </p>
+              <button
+                id="btn-generate-summary-now"
+                type="button"
+                onClick={async () => {
+                  if (!selectedSessionId) return
+                  setIsLoadingSummary(true)
+                  const { generateAndSaveSummary } = await import('../../services/summaryService')
+                  const record = await generateAndSaveSummary(selectedSessionId)
+                  if (record && record.summary_json) {
+                    setSummaryRecord(record)
+                    setSummaryData(record.summary_json)
+                    setEditedSummary(JSON.parse(JSON.stringify(record.summary_json)))
+                  }
+                  setIsLoadingSummary(false)
+                }}
+                className="mt-2 px-5 py-2.5 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-bold text-sm shadow-md cursor-pointer transition-all"
+              >
+                ✨ Generate Clinical Summary Now
+              </button>
             </div>
           ) : (
             <div className="p-6 sm:p-8 space-y-6">
               {/* Section 1: Chief Complaint */}
               <div className="border-b border-slate-100 pb-5">
                 <span className="text-xs font-black uppercase text-teal-800 tracking-wider block mb-1">
-                  1. Chief Complaint (मुख्य समस्या)
+                  1. {locDoc({ en: 'Chief Complaint', hi: 'मुख्य समस्या (Chief Complaint)', mr: 'मुख्य तक्रार (Chief Complaint)', ta: 'முக்கிய புகார்கள்', bn: 'প্রধান সমস্যা', te: 'ముఖ్య ఫిర్యాదు' })}
                 </span>
                 {!isEditMode ? (
                   <p id="field-chief-complaint" className="text-lg font-bold text-slate-900">
@@ -516,7 +636,7 @@ export const ScreenClinician: React.FC = () => {
               {/* Section 2: HPI */}
               <div className="border-b border-slate-100 pb-5">
                 <span className="text-xs font-black uppercase text-teal-800 tracking-wider block mb-1">
-                  2. History of Present Illness (HPI / SOCRATES)
+                  2. {locDoc({ en: 'History of Present Illness (HPI / SOCRATES)', hi: 'वर्तमान बीमारी का विवरण (HPI / SOCRATES)', mr: 'सध्याच्या आजाराचा इतिहास (HPI)', ta: 'தற்போதைய நோயின் வரலாறு', bn: 'বর্তমান অসুস্থতার ইতিহাস', te: 'ప్రస్తుత అనారోగ్య చరిత్ర' })}
                 </span>
                 {!isEditMode ? (
                   <p id="field-hpi" className="text-base text-slate-800 font-medium whitespace-pre-wrap leading-relaxed">
@@ -540,7 +660,7 @@ export const ScreenClinician: React.FC = () => {
               {/* Section 3: Past Medical & Surgical */}
               <div className="border-b border-slate-100 pb-5">
                 <span className="text-xs font-black uppercase text-teal-800 tracking-wider block mb-1">
-                  3. Past Medical & Surgical History (पूर्व रोग एवं शल्य इतिहास)
+                  3. {locDoc({ en: 'Past Medical & Surgical History', hi: 'पूर्व रोग एवं शल्य इतिहास (Past Medical History)', mr: 'पूर्वीचा वैद्यकीय व शस्त्रक्रिया इतिहास', ta: 'முந்தைய மருத்துவ வரலாறு', bn: 'পূর্বের চিকিৎসা ইতিহাস', te: 'గత వైద్య చరిత్ర' })}
                 </span>
                 {!isEditMode ? (
                   <p id="field-past-medical" className="text-base text-slate-800 font-medium">
@@ -564,7 +684,7 @@ export const ScreenClinician: React.FC = () => {
               {/* Section 4: Drug & Allergy */}
               <div className="border-b border-slate-100 pb-5">
                 <span className="text-xs font-black uppercase text-teal-800 tracking-wider block mb-1">
-                  4. Current Medications & Allergies (नियमित दवाइयाँ व एलर्जी)
+                  4. {locDoc({ en: 'Current Medications & Allergies', hi: 'नियमित दवाइयाँ व एलर्जी (Medications & Allergies)', mr: 'नियमित औषधे व ॲलर्जी', ta: 'தற்போதைய மருந்துகள் மற்றும் ஒவ்வாமைகள்', bn: 'বর্তমান ওষুধ ও অ্যালার্জি', te: 'ప్రస్తుత మందులు మరియు అలెర్జీలు' })}
                 </span>
                 {!isEditMode ? (
                   <p id="field-drug-allergy" className="text-base text-slate-800 font-medium">
@@ -589,7 +709,7 @@ export const ScreenClinician: React.FC = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 border-b border-slate-100 pb-5">
                 <div>
                   <span className="text-xs font-black uppercase text-teal-800 tracking-wider block mb-1">
-                    5. Family History
+                    5. {locDoc({ en: 'Family History', hi: 'पारिवारिक इतिहास (Family History)', mr: 'कौटुंबिक इतिहास', ta: 'குடும்ப வரலாறு', bn: 'পারিবারিক ইতিহাস', te: 'కుటుంబ చరిత్ర' })}
                   </span>
                   {!isEditMode ? (
                     <p className="text-sm text-slate-800 font-medium">{summaryData.family_history}</p>
@@ -609,7 +729,7 @@ export const ScreenClinician: React.FC = () => {
 
                 <div>
                   <span className="text-xs font-black uppercase text-teal-800 tracking-wider block mb-1">
-                    6. Personal & Social History
+                    6. {locDoc({ en: 'Personal & Social History', hi: 'व्यक्तिगत व सामाजिक इतिहास', mr: 'वैयक्तिक आणि सामाजिक इतिहास', ta: 'தனிப்பட்ட வரலாறு', bn: 'ব্যক্তিগত ইতিহাস', te: 'వ్యక్తిగత చరిత్ర' })}
                   </span>
                   {!isEditMode ? (
                     <p className="text-sm text-slate-800 font-medium">{summaryData.personal_history}</p>
@@ -631,7 +751,7 @@ export const ScreenClinician: React.FC = () => {
               {/* Section 7: Review of Systems */}
               <div className="border-b border-slate-100 pb-5">
                 <span className="text-xs font-black uppercase text-teal-800 tracking-wider block mb-1">
-                  7. Review of Systems (ROS)
+                  7. {locDoc({ en: 'Review of Systems (ROS)', hi: 'शारीरिक प्रणाली समीक्षा (ROS)', mr: 'शारीरिक प्रणाली पुनरावलोकन', ta: 'அமைப்புசார் ஆய்வு (ROS)', bn: 'শারীরিক পরীক্ষা (ROS)', te: 'శరీర వ్యవస్థల సమీక్ష (ROS)' })}
                 </span>
                 {!isEditMode ? (
                   <p className="text-sm text-slate-800 font-medium">{summaryData.review_of_systems}</p>
@@ -655,7 +775,7 @@ export const ScreenClinician: React.FC = () => {
                   <div className="flex items-center gap-2 mb-3">
                     <span className="text-2xl">🌿</span>
                     <h3 className="text-base font-extrabold text-emerald-950 uppercase tracking-wide">
-                      8. AYUSH Ayurvedic Clinical Assessment (आयुर्वेदिक परीक्षण)
+                      8. {locDoc({ en: 'AYUSH Ayurvedic Clinical Assessment', hi: 'आयुष (आयुर्वेदिक परीक्षण)', mr: 'आयुष (आयुर्वेदिक मूल्यमापन)', ta: 'ஆயுஷ் ஆயுர்வேத மதிப்பீடு', bn: 'আয়ুষ আয়ুর্বেদিক মূল্যায়ন', te: 'ఆయుష్ ఆయుర్వేద మూల్యాంకనం' })}
                     </h3>
                   </div>
 

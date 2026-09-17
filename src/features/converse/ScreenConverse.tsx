@@ -22,6 +22,7 @@ export const ScreenConverse: React.FC = () => {
     setCurrentSession,
     setScreenAudio,
     playAudio,
+    setIsRedFlagActive,
   } = useKiosk()
 
   // Conversation history
@@ -40,6 +41,14 @@ export const ScreenConverse: React.FC = () => {
     severity: 'critical' | 'high' | 'medium' | null
     recordId: string | null
   } | null>(null)
+
+  // Sync red flag state with KioskContext to hide Call-For-Help button during red flags
+  useEffect(() => {
+    setIsRedFlagActive(!!activeRedFlag)
+    return () => {
+      setIsRedFlagActive(false)
+    }
+  }, [activeRedFlag, setIsRedFlagActive])
 
   // Text input fallback state (allows typing if microphone is unsupported/noisy)
   const [manualText, setManualText] = useState<string>('')
@@ -148,18 +157,21 @@ export const ScreenConverse: React.FC = () => {
   }
 
   // Answer handler for both touch tap and voice input
+  // Answer handler for both touch tap and voice input
   const handleAnswer = async (
     answerText: string,
     source: 'voice' | 'touch' = 'touch',
     optionValue?: string
   ) => {
-    if (!currentTurn || !answerText.trim()) return
+    if (!currentTurn || !answerText.trim() || loadingNext) return
+    setLoadingNext(true)
 
-    // Stop listening if mic was active
-    if (isListening) {
-      speechRecognitionService.stop()
-      setIsListening(false)
-    }
+    // Cleanly stop listening and reset microphone
+    speechRecognitionService.stop()
+    setIsListening(false)
+    setLiveTranscript('')
+    setManualText('')
+    setShowManualInput(false)
 
     const newTurn: ConversationTurn = {
       field_key: currentTurn.field_key,
@@ -170,12 +182,24 @@ export const ScreenConverse: React.FC = () => {
 
     const updatedHistory = [...history, newTurn]
     setHistory(updatedHistory)
-    setLiveTranscript('')
-    setManualText('')
-    setShowManualInput(false)
 
-    // Save Q&A pair to Supabase history_responses table
-    const sessionId = currentSession?.id
+    // Resolve active session ID safely
+    let sessionId = currentSession?.id
+    if (!sessionId) {
+      try {
+        const { data: latest } = await supabase
+          .from('sessions')
+          .select('id')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        sessionId = latest?.id
+      } catch (err) {
+        console.warn('Could not auto-fetch session ID:', err)
+      }
+    }
+
+    // Save Q&A pair to Supabase immediately
     if (sessionId) {
       try {
         await supabase.from('history_responses').insert({
@@ -191,13 +215,8 @@ export const ScreenConverse: React.FC = () => {
           source,
           captured_at: new Date().toISOString(),
         })
-      } catch (err) {
-        console.warn('Could not persist response to Supabase:', err)
-      }
 
-      // If this question is part of the AYUSH clinical inquiry, persist to ayush_history
-      if (currentTurn.field_key.startsWith('ayush_')) {
-        try {
+        if (currentTurn.field_key.startsWith('ayush_')) {
           const matchedOpt = currentTurn.options.find(
             (o) =>
               o.label === answerText ||
@@ -207,7 +226,6 @@ export const ScreenConverse: React.FC = () => {
           )
           const optVal = optionValue || matchedOpt?.value || answerText
 
-          // Query existing row to preserve accumulated data across questions
           const { data: existingAyush } = await supabase
             .from('ayush_history')
             .select('*')
@@ -228,16 +246,12 @@ export const ScreenConverse: React.FC = () => {
             ayushPayload.prakriti_json = {
               constitution: optVal,
               answer: answerText.trim(),
-              option_label: matchedOpt?.label || null,
-              option_label_localized: matchedOpt?.label_localized || null,
               captured_at: new Date().toISOString(),
             }
           } else if (currentTurn.field_key === 'ayush_vikriti') {
             ayushPayload.vikriti_json = {
               imbalance: optVal,
               answer: answerText.trim(),
-              option_label: matchedOpt?.label || null,
-              option_label_localized: matchedOpt?.label_localized || null,
               captured_at: new Date().toISOString(),
             }
           } else if (currentTurn.field_key === 'ayush_agni') {
@@ -248,46 +262,44 @@ export const ScreenConverse: React.FC = () => {
             ayushPayload.ahara_vihara_json = {
               diet_routine: optVal,
               answer: answerText.trim(),
-              option_label: matchedOpt?.label || null,
-              option_label_localized: matchedOpt?.label_localized || null,
               captured_at: new Date().toISOString(),
             }
           }
 
-          const { error: ayushErr } = await supabase
-            .from('ayush_history')
-            .upsert(ayushPayload, { onConflict: 'session_id' })
-
-          if (ayushErr) {
-            console.error('Error updating ayush_history:', ayushErr)
-          } else {
-            console.log('Successfully saved to ayush_history:', currentTurn.field_key, optVal)
-          }
-        } catch (ayushCatchErr) {
-          console.error('Exception updating ayush_history:', ayushCatchErr)
+          await supabase.from('ayush_history').upsert(ayushPayload, { onConflict: 'session_id' })
         }
+      } catch (bgErr) {
+        console.warn('Response persist error:', bgErr)
       }
     }
 
-    // Check if the answer itself triggers an immediate red flag (e.g. chest pain)
+    // Check if the answer triggers an immediate red flag
     const lowerAns = answerText.toLowerCase()
     if (
       (lowerAns.includes('chest') || lowerAns.includes('सीने') || lowerAns.includes('छाती')) &&
       (lowerAns.includes('breath') || lowerAns.includes('सांस') || lowerAns.includes('severe') || lowerAns.includes('दर्द'))
     ) {
-      await handleTriggerRedFlag(
+      handleTriggerRedFlag(
         'Severe chest pain with respiratory discomfort reported',
-        'critical'
-      )
+        'critical',
+        sessionId
+      ).catch(console.warn)
     }
 
-    // Check if interview is complete
-    if (currentTurn.is_complete) {
+    // Hard completion check: exactly 7 questions max (or if already complete)
+    const isAyush = activeDepartment === 'ayush' || activeDepartment.includes('ayush')
+    const maxLimit = isAyush ? 6 : 7
+    if (
+      currentTurn.is_complete ||
+      currentTurn.field_key === 'interview_completed' ||
+      currentTurn.field_key === 'ready_for_scan' ||
+      updatedHistory.length >= maxLimit
+    ) {
       await handleCompleteInterview()
       return
     }
 
-    // Fetch next question in the SOCRATES / HPI decision tree
+    // Advance immediately to next question
     await fetchQuestion(updatedHistory)
   }
 
@@ -317,13 +329,14 @@ export const ScreenConverse: React.FC = () => {
     navigate('/scan')
   }
 
-  // Microphone toggle (Web Speech API ASR)
+  // Microphone toggle (Speech Recognition ASR)
   const toggleMicrophone = () => {
     if (isListening) {
       speechRecognitionService.stop()
       setIsListening(false)
-      if (liveTranscript.trim()) {
-        handleAnswer(liveTranscript, 'voice')
+      const cleanText = liveTranscript.replace(/^[🎤⏳].*?\.\.\.?\s*/, '').trim()
+      if (cleanText.length > 1) {
+        handleAnswer(cleanText, 'voice')
       }
       return
     }
@@ -347,16 +360,22 @@ export const ScreenConverse: React.FC = () => {
     const started = speechRecognitionService.start(speechLang, {
       onTranscript: (text, isFinal) => {
         setLiveTranscript(text)
-        if (isFinal && text.trim().length > 2) {
-          // Auto submit on final clear speech
+        const isStatusMsg = text.startsWith('🎤') || text.startsWith('⏳')
+        if (!isStatusMsg && text.trim().length > 0) {
+          setManualText(text)
+        }
+
+        if (isFinal && !isStatusMsg && text.trim().length > 1) {
+          // Auto submit on final clear speech after brief pause
           setTimeout(() => {
             handleAnswer(text, 'voice')
-          }, 600)
+          }, 800)
         }
       },
       onError: (err) => {
         setSpeechError(err)
         setIsListening(false)
+        setShowManualInput(true)
       },
       onEnd: () => {
         setIsListening(false)
@@ -379,13 +398,32 @@ export const ScreenConverse: React.FC = () => {
     }, 400)
   }
 
+  // Helper for multi-lingual UI localization
+  const locConverse = useCallback(
+    (texts: { en: string; hi: string; mr: string; ta?: string; bn?: string; te?: string }) => {
+      const target = texts[language]
+      if (target) return target
+      if (language === 'mr') return texts.mr
+      if (language === 'hi') return texts.hi
+      return texts.en
+    },
+    [language]
+  )
+
   return (
     <div className="min-h-screen flex flex-col bg-sky-50/50 text-slate-800">
       <KioskHeader
         showBack={true}
-        onBack={() => navigate('/')}
+        onBack={() => navigate('/kiosk')}
         stepNumber={2}
-        stepTitle={language === 'hi' ? 'चरण 2: स्वास्थ्य बातचीत' : 'Step 2: Health Interview'}
+        stepTitle={locConverse({
+          en: 'Step 2: Health Interview',
+          hi: 'चरण 2: स्वास्थ्य बातचीत',
+          mr: 'पायरी २: आरोग्य संवाद',
+          ta: 'படி 2: சுகாதார நேர்காணல்',
+          bn: 'ধাপ ২: স্বাস্থ্য কথোপকথন',
+          te: 'దశ 2: ఆరోగ్య సంభాషణ',
+        })}
       />
 
       {/* ── RED FLAG EMERGENCY SCREEN ─────────────────────────────────── */}
@@ -413,11 +451,27 @@ export const ScreenConverse: React.FC = () => {
                   className="font-bold text-emerald-900 bg-emerald-100 border border-emerald-300 px-3 py-1 rounded-xl text-xs sm:text-sm flex items-center gap-1.5 shadow-xs"
                 >
                   <span>🌿</span>
-                  <span>आयुष (आयुर्वेद) ओपीडी</span>
+                  <span>
+                    {locConverse({
+                      en: 'AYUSH OPD',
+                      hi: 'आयुष (आयुर्वेद) ओपीडी',
+                      mr: 'आयुष (आयुर्वेद) ओपीडी',
+                      ta: 'ஆயுஷ் (ஆயுர்வேதம்) OPD',
+                      bn: 'আয়ুষ (আয়ুর্বেদ) ওপিডি',
+                      te: 'ఆయుష్ (ఆయుర్వేదం) OPD',
+                    })}
+                  </span>
                 </span>
               ) : (
                 <span className="font-semibold text-teal-800 bg-teal-50 border border-teal-200 px-3 py-1 rounded-xl text-xs sm:text-sm">
-                  🏥 सामान्य ओपीडी
+                  {locConverse({
+                    en: '🏥 General OPD',
+                    hi: '🏥 सामान्य ओपीडी',
+                    mr: '🏥 सामान्य ओपीडी',
+                    ta: '🏥 பொது OPD',
+                    bn: '🏥 সাধারণ ওপিডি',
+                    te: '🏥 సాధారణ OPD',
+                  })}
                 </span>
               )}
               {currentSession?.token_number && (
@@ -435,9 +489,14 @@ export const ScreenConverse: React.FC = () => {
           {currentTurn?.progress && (
             <div className="w-full flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
               <span className="text-sm font-bold text-teal-800 bg-teal-50 px-3 py-1 rounded-full">
-                {language === 'hi'
-                  ? `प्रश्न ${currentTurn.progress.current} (लगभग ${currentTurn.progress.total} में से)`
-                  : `Question ${currentTurn.progress.current} of about ${currentTurn.progress.total}`}
+                {locConverse({
+                  en: `Question ${currentTurn.progress.current} of about ${currentTurn.progress.total}`,
+                  hi: `प्रश्न ${currentTurn.progress.current} (लगभग ${currentTurn.progress.total} में से)`,
+                  mr: `प्रश्न ${currentTurn.progress.current} (सुमारे ${currentTurn.progress.total} पैकी)`,
+                  ta: `கேள்வி ${currentTurn.progress.current} / ${currentTurn.progress.total}`,
+                  bn: `প্রশ্ন ${currentTurn.progress.current} / ${currentTurn.progress.total}`,
+                  te: `ప్రశ్న ${currentTurn.progress.current} / ${currentTurn.progress.total}`,
+                })}
               </span>
               <div className="w-32 bg-slate-100 rounded-full h-2.5 overflow-hidden">
                 <div
@@ -464,16 +523,26 @@ export const ScreenConverse: React.FC = () => {
             className="text-2xl sm:text-3xl lg:text-4xl font-extrabold text-teal-950 mb-3 tracking-tight leading-snug"
           >
             {loadingNext
-              ? language === 'hi'
-                ? 'अगला प्रश्न तैयार किया जा रहा है...'
-                : 'Preparing next clinical question...'
+              ? locConverse({
+                  en: 'Preparing next clinical question...',
+                  hi: 'अगला प्रश्न तैयार किया जा रहा है...',
+                  mr: 'पुढील प्रश्न तयार केला जात आहे...',
+                  ta: 'அடுத்த கேள்வி தயார் செய்யப்படுகிறது...',
+                  bn: 'পরবর্তী প্রশ্ন তৈরি করা হচ্ছে...',
+                  te: 'తరువాత ప్రశ్న సిద్ధమవుతోంది...',
+                })
               : currentTurn?.question_localized || currentTurn?.question}
           </h2>
 
           <p className="text-base sm:text-lg font-medium text-slate-500 mb-6">
-            {language === 'hi'
-              ? 'नीचे दिए गए विकल्प को छुएँ या माइक दबाकर बोलें'
-              : 'Tap an option below or press the microphone to speak'}
+            {locConverse({
+              en: 'Tap an option below or press the microphone to speak',
+              hi: 'नीचे दिए गए विकल्प को छुएँ या माइक दबाकर बोलें',
+              mr: 'खालील पर्यायावर स्पर्श करा किंवा माइक दाबून बोला',
+              ta: 'கீழே உள்ள விருப்பத்தைத் தொடவும் அல்லது மைக்கை அழுத்திப் பேசவும்',
+              bn: 'নিচের বিকল্পে স্পর্শ করুন বা বোতাম চেপে বলুন',
+              te: 'క్రింది ఎంపికను తాకండి లేదా మైక్ నొక్కి మాట్లాడండి',
+            })}
           </p>
 
           {/* ── INTERACTIVE OPTIONS (TAP-TO-ANSWER BUTTONS) ──────────────── */}
@@ -482,9 +551,14 @@ export const ScreenConverse: React.FC = () => {
               <button
                 key={idx}
                 id={`btn-opt-answer-${idx}`}
+                disabled={loadingNext}
                 onClick={() => handleAnswer(opt.label_localized || opt.label, 'touch', opt.value)}
                 type="button"
-                className="group flex items-center justify-between p-4 sm:p-5 rounded-2xl bg-white border-2 border-teal-200 hover:border-teal-600 hover:bg-teal-50/60 active:scale-98 shadow-xs hover:shadow-md transition-all duration-150 text-left cursor-pointer min-h-[64px]"
+                className={`group flex items-center justify-between p-4 sm:p-5 rounded-2xl bg-white border-2 transition-all duration-150 text-left min-h-[64px] ${
+                  loadingNext
+                    ? 'opacity-60 cursor-not-allowed border-slate-200'
+                    : 'border-teal-200 hover:border-teal-600 hover:bg-teal-50/60 active:scale-98 shadow-xs hover:shadow-md cursor-pointer'
+                }`}
               >
                 <span className="text-lg sm:text-xl font-bold text-slate-900 group-hover:text-teal-950">
                   {opt.label_localized || opt.label}
@@ -500,12 +574,15 @@ export const ScreenConverse: React.FC = () => {
               <div className="relative mb-3">
                 <button
                   id="btn-voice-mic"
+                  disabled={loadingNext}
                   onClick={toggleMicrophone}
                   type="button"
-                  className={`w-20 h-20 sm:w-24 sm:h-24 rounded-full flex items-center justify-center text-4xl shadow-xl transition-transform active:scale-95 cursor-pointer ${
-                    isListening
-                      ? 'bg-red-600 text-white ring-8 ring-red-200 animate-pulse'
-                      : 'bg-teal-700 hover:bg-teal-800 text-white ring-4 ring-teal-100'
+                  className={`w-20 h-20 sm:w-24 sm:h-24 rounded-full flex items-center justify-center text-4xl shadow-xl transition-transform active:scale-95 ${
+                    loadingNext
+                      ? 'opacity-50 cursor-not-allowed bg-slate-400'
+                      : isListening
+                      ? 'bg-red-600 text-white ring-8 ring-red-200 animate-pulse cursor-pointer'
+                      : 'bg-teal-700 hover:bg-teal-800 text-white ring-4 ring-teal-100 cursor-pointer'
                   }`}
                   aria-label="Toggle Microphone"
                   title="Speak your answer"
@@ -516,19 +593,36 @@ export const ScreenConverse: React.FC = () => {
 
               <span className="text-base sm:text-lg font-bold text-slate-700 mb-2">
                 {isListening
-                  ? language === 'hi'
-                    ? 'सुन रहे हैं... कृपया बोलें'
-                    : 'Listening... please speak now'
-                  : language === 'hi'
-                  ? 'बोलकर उत्तर देने के लिए माइक दबाएँ'
-                  : 'Press mic to answer with your voice'}
+                  ? locConverse({
+                      en: 'Listening... please speak now',
+                      hi: 'सुन रहे हैं... कृपया बोलें',
+                      mr: 'ऐकत आहोत... कृपया बोला',
+                      ta: 'கேட்கிறது... பேசவும்',
+                      bn: 'শুনছি... অনুগ্রহ করে বলুন',
+                      te: 'వింటోంది... మాట్లాడండి',
+                    })
+                  : locConverse({
+                      en: 'Press mic to answer with your voice',
+                      hi: 'बोलकर उत्तर देने के लिए माइक दबाएँ',
+                      mr: 'बोलून उत्तर देण्यासाठी माइक दाबा',
+                      ta: 'குரலில் பதிலளிக்க மைக்கை அழுத்தவும்',
+                      bn: 'কণ্ঠে উত্তর দিতে মাইক চাপুন',
+                      te: 'వాయిస్‌తో జవాబివ్వడానికి మైక్ నొక్కండి',
+                    })}
               </span>
 
               {/* Live Speech Feedback Box */}
               {liveTranscript && (
                 <div className="w-full bg-sky-50 border-2 border-sky-300 rounded-2xl p-4 mt-2 mb-3 text-left">
                   <span className="text-xs font-bold text-sky-800 block mb-1 uppercase tracking-wider">
-                    आवाज़ पहचानी गई (Recognized Voice):
+                    {locConverse({
+                      en: 'Recognized Voice:',
+                      hi: 'आवाज़ पहचानी गई (Recognized Voice):',
+                      mr: 'आवाज ओळखला गेला (Recognized Voice):',
+                      ta: 'அறியப்பட்ட குரல்:',
+                      bn: 'শনাক্ত করা বাক্য:',
+                      te: 'గుర్తించబడిన ధ్వని:',
+                    })}
                   </span>
                   <p className="text-xl font-bold text-slate-900">{liveTranscript}</p>
                 </div>
@@ -541,39 +635,85 @@ export const ScreenConverse: React.FC = () => {
                 </div>
               )}
 
-              {/* Demo voice simulation helper (for browser subagent testing) */}
+              {/* Demo voice simulation helper */}
               <div className="flex flex-wrap items-center justify-center gap-2 mt-2">
                 <button
                   id="btn-demo-speak-ayush"
                   type="button"
                   onClick={() =>
-                    simulateVoiceAnswer('मुझे वात और जोड़ों में दर्द की तकलीफ़ रहती है')
+                    simulateVoiceAnswer(
+                      locConverse({
+                        en: 'I have joint pain and indigestion',
+                        hi: 'मुझे वात और जोड़ों में दर्द की तकलीफ़ रहती है',
+                        mr: 'मला वात आणि सांधेदुखीचा त्रास राहतो',
+                        ta: 'எனக்கு மூட்டு வலி உள்ளது',
+                        bn: 'আমার জয়েন্টে ব্যথা আছে',
+                        te: 'నాకు కీళ్ల నొప్పులు ఉన్నాయి',
+                      })
+                    )
                   }
                   className="text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 px-3 py-1.5 rounded-lg border border-emerald-300 cursor-pointer"
                 >
-                  🌿 नमूना आवाज़: "वात व जोड़ों का दर्द"
+                  {locConverse({
+                    en: '🌿 Demo Voice: Joint Pain',
+                    hi: '🌿 नमूना आवाज़: "वात व जोड़ों का दर्द"',
+                    mr: '🌿 नमुना आवाज: "वात व सांधेदुखी"',
+                    ta: '🌿 மாதிரி குரல்: மூட்டு வலி',
+                    bn: '🌿 ডেমো ভয়েস: জয়েন্ট পেইন',
+                    te: '🌿 డెమో వాయిస్: కీళ్ల నొప్పులు',
+                  })}
                 </button>
                 <button
                   id="btn-demo-speak-pain"
                   type="button"
                   onClick={() =>
-                    simulateVoiceAnswer('मुझे २ दिन से पेट में तेज़ दर्द हो रहा है')
+                    simulateVoiceAnswer(
+                      locConverse({
+                        en: 'I have severe stomach pain since 2 days',
+                        hi: 'मुझे २ दिन से पेट में तेज़ दर्द हो रहा है',
+                        mr: 'मला २ दिवसांपासून पोटात तीव्र दुखत आहे',
+                        ta: 'எனக்கு 2 நாட்களாக கடுமையான வயிற்று வலி உள்ளது',
+                        bn: 'আমার ২ দিন ধরে পেটে তীব্র ব্যথা',
+                        te: 'నాకు 2 రోజుల నుండి తీవ్రమైన కడుపునొప్పి ఉంది',
+                      })
+                    )
                   }
                   className="text-xs font-bold text-teal-800 bg-teal-50 hover:bg-teal-100 px-3 py-1.5 rounded-lg border border-teal-200 cursor-pointer"
                 >
-                  🗣️ नमूना आवाज़: "पेट में तेज़ दर्द"
+                  {locConverse({
+                    en: '🗣️ Demo Voice: Stomach Pain',
+                    hi: '🗣️ नमूना आवाज़: "पेट में तेज़ दर्द"',
+                    mr: '🗣️ नमुना आवाज: "पोटात तीव्र वेदना"',
+                    ta: '🗣️ மாதிரி குரல்: வயிற்று வலி',
+                    bn: '🗣️ ডেমো ভয়েস: পেট ব্যথা',
+                    te: '🗣️ డెమో వాయిస్: కడుపునొప్పి',
+                  })}
                 </button>
                 <button
                   id="btn-demo-speak-chest"
                   type="button"
                   onClick={() =>
                     simulateVoiceAnswer(
-                      'सीने में भारी दबाव और सांस लेने में बहुत तकलीफ़ है (Severe chest pain and breathlessness)'
+                      locConverse({
+                        en: 'Severe chest pain and heavy breathlessness',
+                        hi: 'सीने में भारी दबाव और सांस लेने में बहुत तकलीफ़ है',
+                        mr: 'छातीत तीव्र कळा आणि श्वास घेताना खूप त्रास होतोय',
+                        ta: 'கடுமையான நெஞ்சு வலி மற்றும் மூச்சுத்திணறல்',
+                        bn: 'বুকে তীব্র ব্যথা এবং শ্বাসকষ্ট',
+                        te: 'తీవ్రమైన ఛాతీ నొప్పి మరియు శ్వాస ఆడకపోవడం',
+                      })
                     )
                   }
                   className="text-xs font-bold text-red-800 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg border border-red-200 cursor-pointer"
                 >
-                  ⚠️ आपातकालीन आवाज़ (Test Red Flag)
+                  {locConverse({
+                    en: '⚠️ Emergency Test (Red Flag)',
+                    hi: '⚠️ आपातकालीन आवाज़ (Test Red Flag)',
+                    mr: '⚠️ आणीबाणी चाचणी (Test Red Flag)',
+                    ta: '⚠️ அவசர சோதனை (Red Flag)',
+                    bn: '⚠️ জরুরি পরীক্ষা (Red Flag)',
+                    te: '⚠️ అత్యవసర పరీక్ష (Red Flag)',
+                  })}
                 </button>
               </div>
 
@@ -585,7 +725,14 @@ export const ScreenConverse: React.FC = () => {
                     onClick={() => setShowManualInput(true)}
                     className="text-xs font-semibold text-slate-500 hover:text-slate-800 underline cursor-pointer"
                   >
-                    लिखकर उत्तर देना चाहते हैं? (Type with keyboard)
+                    {locConverse({
+                      en: 'Type with keyboard instead?',
+                      hi: 'लिखकर उत्तर देना चाहते हैं? (Type with keyboard)',
+                      mr: 'टाइप करून उत्तर देऊ इच्छिता? (Type with keyboard)',
+                      ta: 'விசைப்பலகை மூலம் தட்டச்சு செய்ய விரும்புகிறீர்களா?',
+                      bn: 'কিবোর্ড দিয়ে টাইপ করতে চান?',
+                      te: 'కీబోర్డ్‌తో టైప్ చేయాలనుకుంటున్నారా?',
+                    })}
                   </button>
                 ) : (
                   <div className="flex gap-2 mt-2 w-full max-w-md">
@@ -594,9 +741,14 @@ export const ScreenConverse: React.FC = () => {
                       type="text"
                       value={manualText}
                       onChange={(e) => setManualText(e.target.value)}
-                      placeholder={
-                        language === 'hi' ? 'यहाँ अपना उत्तर लिखें...' : 'Type your answer here...'
-                      }
+                      placeholder={locConverse({
+                        en: 'Type your answer here...',
+                        hi: 'यहाँ अपना उत्तर लिखें...',
+                        mr: 'येथे आपले उत्तर लिहा...',
+                        ta: 'உங்கள் பதிலை இங்கே தட்டச்சு செய்க...',
+                        bn: 'আপনার উত্তর লিখুন...',
+                        te: 'మీ సమాధానం ఇక్కడ టైప్ చేయండి...',
+                      })}
                       className="flex-1 px-4 py-2.5 rounded-xl border-2 border-slate-300 text-slate-900 text-base focus:border-teal-700 focus:outline-none"
                     />
                     <button
@@ -605,7 +757,14 @@ export const ScreenConverse: React.FC = () => {
                       onClick={() => handleAnswer(manualText, 'touch')}
                       className="px-4 py-2.5 rounded-xl bg-teal-700 text-white font-bold hover:bg-teal-800 cursor-pointer"
                     >
-                      भेजें (Send)
+                      {locConverse({
+                        en: 'Send',
+                        hi: 'भेजें (Send)',
+                        mr: 'पाठवा (Send)',
+                        ta: 'அனுப்பு',
+                        bn: 'পাঠান',
+                        te: 'పంపు',
+                      })}
                     </button>
                   </div>
                 )}

@@ -44,12 +44,25 @@ export const ScreenScan: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const initialFetchDone = useRef(false)
 
+  // Helper for multi-lingual localization
+  const locText = (texts: { en: string; hi: string; mr: string; ta?: string; bn?: string; te?: string }) => {
+    const target = texts[language]
+    if (target) return target
+    if (language === 'mr') return texts.mr
+    if (language === 'hi') return texts.hi
+    return texts.en
+  }
+
   // Localized audio prompt on screen load
   useEffect(() => {
-    const promptText =
-      language === 'hi'
-        ? 'क्या आपके पास कोई पुराना डॉक्टर का पर्चा, खून की जाँच रिपोर्ट या अस्पताल का डिस्चार्ज कार्ड है? नीचे दिए गए बड़े कैमरा बटन को दबाकर फ़ोटो लें, या यदि कोई पर्चा नहीं है तो आगे बढ़ें।'
-        : "Have any old prescriptions, lab reports, or discharge papers? Let's take a photo, or skip if you don't have any."
+    const promptText = locText({
+      en: "Have any old prescriptions, lab reports, or discharge papers? Let's take a photo, or skip if you don't have any.",
+      hi: 'क्या आपके पास कोई पुराना डॉक्टर का पर्चा, खून की जाँच रिपोर्ट या अस्पताल का डिस्चार्ज कार्ड है? नीचे दिए गए बड़े कैमरा बटन को दबाकर फ़ोटो लें, या यदि कोई पर्चा नहीं है तो आगे बढ़ें।',
+      mr: 'तुमच्याकडे जुने डॉक्टरांचे प्रिस्क्रिप्शन, रक्त तपासणी रिपोर्ट किंवा डिस्चार्ज कार्ड आहे का? खालील कॅमेरा बटणावर क्लिक करून फोटो घ्या, किंवा कागदपत्रे नसल्यास पुढे जा.',
+      ta: 'உங்களிடம் பழைய மருந்துக் குறிப்புகள் அல்லது ஆய்வக அறிக்கைகள் உள்ளதா? புகைப்படமெடுக்கவும் அல்லது தவிர்க்கவும்.',
+      bn: 'আপনার কি পুরোনো প্রেসক্রিপশন বা ল্যাব রিপোর্ট আছে? ছবি তুলুন বা এগিয়ে যান।',
+      te: 'మీ వద్ద పాత ప్రిస్క్రిప్షన్లు లేదా ల్యాబ్ నివేదికలు ఉన్నాయా? ఫోటో తీయండి లేదా ముందుకు సాగండి.',
+    })
 
     setScreenAudio(promptText)
   }, [language, setScreenAudio])
@@ -131,9 +144,11 @@ export const ScreenScan: React.FC = () => {
     setIsProcessing(true)
     setErrorMsg(null)
     setProcessingStatusText(
-      language === 'hi'
-        ? 'दस्तावेज़ अपलोड किया जा रहा है...'
-        : 'Uploading medical document...'
+      locText({
+        mr: 'वैद्यकीय कागदपत्र अपलोड होत आहे...',
+        hi: 'दस्तावेज़ अपलोड किया जा रहा है...',
+        en: 'Uploading medical document...',
+      })
     )
 
     // Local object URL for instant UI thumbnail preview
@@ -148,9 +163,11 @@ export const ScreenScan: React.FC = () => {
       )
 
       setProcessingStatusText(
-        language === 'hi'
-          ? 'एआई द्वारा पर्चे की दवाइयाँ व जाँच पढ़ी जा रही हैं...'
-          : 'Digitizing prescriptions & lab values with AI OCR...'
+        locText({
+          mr: 'एआई द्वारे प्रिस्क्रिप्शन आणि तपासणी अहवाल वाचला जात आहे...',
+          hi: 'एआई द्वारा पर्चे की दवाइयाँ व जाँच पढ़ी जा रही हैं...',
+          en: 'Digitizing prescriptions & lab values with AI OCR...',
+        })
       )
 
       // 2. Insert row into documents table (session_id, storage_path, doc_type: 'unclassified', ocr_status: 'pending')
@@ -158,13 +175,14 @@ export const ScreenScan: React.FC = () => {
 
       const docId = docRecord?.id || `doc-${Date.now()}`
 
-      // 3. Call digitize-document Edge Function / OCR model
+      // 3. Call digitize-document Edge Function / OCR model (with real image data)
       const structuredData = await processAndSaveOcr(
         docId,
         sessionId,
         storagePath,
         filename,
-        documents.length
+        documents.length,
+        file // Pass the actual image file for Gemini Vision OCR
       )
 
       // 4. Update UI document state
@@ -182,18 +200,21 @@ export const ScreenScan: React.FC = () => {
       setDocuments((prev) => [...prev, newDocItem])
       setActivePreviewDoc(newDocItem)
 
-      // Announce success
-      const successAudio =
-        language === 'hi'
-          ? 'दस्तावेज़ सफलतापूर्वक डिजिटाइज़ कर लिया गया है।'
-          : 'Document successfully digitized.'
+      // Announce success in selected language
+      const successAudio = locText({
+        mr: 'कागदपत्र यशस्वीरीत्या स्कॅन केले गेले आहे.',
+        hi: 'दस्तावेज़ सफलतापूर्वक डिजिटाइज़ कर लिया गया है।',
+        en: 'Document successfully digitized.',
+      })
       playAudio(successAudio)
     } catch (err: any) {
       console.error('Document digitization error:', err)
       setErrorMsg(
-        language === 'hi'
-          ? 'दस्तावेज़ स्कैन करने में त्रुटि आई। कृपया पुनः प्रयास करें।'
-          : 'Failed to process document. Please try again.'
+        locText({
+          mr: 'कागदपत्र स्कॅन करताना त्रुटी आली. कृपया पुन्हा प्रयत्न करा.',
+          hi: 'दस्तावेज़ स्कैन करने में त्रुटि आई। कृपया पुनः प्रयास करें।',
+          en: 'Failed to process document. Please try again.',
+        })
       )
     } finally {
       setIsProcessing(false)
@@ -427,7 +448,14 @@ export const ScreenScan: React.FC = () => {
         showBack={true}
         onBack={() => navigate('/converse')}
         stepNumber={3}
-        stepTitle={language === 'hi' ? 'चरण 3: पुराने पर्चे व जाँच स्कैन' : 'Step 3: Medical Document Scan'}
+        stepTitle={locText({
+          en: 'Step 3: Medical Document Scan',
+          hi: 'चरण 3: पुराने पर्चे व जाँच स्कैन',
+          mr: 'पायरी ३: जुने रिपोर्ट व औषधपत्रिका स्कॅन',
+          ta: 'படி 3: மருத்துவ ஆவண ஸ்கேன்',
+          bn: 'ধাপ ৩: চিকিৎসা সংক্রান্ত নথি স্ক্যান',
+          te: 'దశ 3: వైద్య పత్రాల స్కాన్',
+        })}
       />
 
       <main className="flex-1 flex flex-col items-center justify-center p-4 sm:p-6 max-w-4xl mx-auto w-full">
@@ -446,7 +474,7 @@ export const ScreenScan: React.FC = () => {
               )}
               {documents.length > 0 && (
                 <span className="font-bold text-emerald-900 bg-emerald-100 border border-emerald-300 px-3 py-1 rounded-xl text-xs sm:text-sm">
-                  ✓ {documents.length} {language === 'hi' ? 'दस्तावेज़ जाँचे गए' : 'Scanned'}
+                  ✓ {documents.length} {locText({ en: 'Scanned', hi: 'दस्तावेज़ जाँचे गए', mr: 'कागदपत्रे तपासली गेली', ta: 'ஸ்கேன் செய்யப்பட்டது', bn: 'স্ক্যান করা হয়েছে', te: 'స్కాన్ చేయబడింది' })}
                 </span>
               )}
             </div>
@@ -465,16 +493,26 @@ export const ScreenScan: React.FC = () => {
             id="scan-heading-text"
             className="text-2xl sm:text-3xl lg:text-4xl font-extrabold text-teal-950 mb-3 tracking-tight leading-snug"
           >
-            {language === 'hi'
-              ? 'पुराने पर्चे या जाँच रिपोर्ट की फ़ोटो लें'
-              : 'Take a photo of your medical documents'}
+            {locText({
+              en: 'Take a photo of your medical documents',
+              hi: 'पुराने पर्चे या जाँच रिपोर्ट की फ़ोटो लें',
+              mr: 'जुने प्रिस्क्रिप्शन किंवा तपासणी अहवालाचा फोटो घ्या',
+              ta: 'உங்கள் மருத்துவ ஆவணங்களின் புகைப்படத்தை எடுக்கவும்',
+              bn: 'আপনার ডাক্তারি প্রেসক্রিপশনের ছবি তুলুন',
+              te: 'మీ వైద్య పత్రాల ఫోటో తీయండి',
+            })}
           </h2>
 
           {/* Friendly Explanation (Not Jargon) */}
           <p className="text-base sm:text-lg font-medium text-slate-600 max-w-xl mb-6">
-            {language === 'hi'
-              ? 'क्या आपके पास कोई पुराना डॉक्टर का पर्चा, खून की जाँच या डिस्चार्ज कार्ड है? नीचे कैमरा बटन दबाकर फ़ोटो खींचें।'
-              : 'Have any old prescriptions, lab reports, or discharge papers? Capture a quick photo below so the doctor has your complete history.'}
+            {locText({
+              en: 'Have any old prescriptions, lab reports, or discharge papers? Capture a quick photo below so the doctor has your complete history.',
+              hi: 'क्या आपके पास कोई पुराना डॉक्टर का पर्चा, खून की जाँच या डिस्चार्ज कार्ड है? नीचे कैमरा बटन दबाकर फ़ोटो खींचें।',
+              mr: 'तुमच्याकडे जुनी औषधपत्रिका, रक्त तपासणी किंवा डिस्चार्ज कार्ड आहे का? खालील कॅमेरा बटण दाबून फोटो काढा.',
+              ta: 'உங்களிடம் பழைய மருந்துக் குறிப்புகள் அல்லது அறிக்கைகள் உள்ளதா? புகைப்படமெடுக்கவும்.',
+              bn: 'আপনার কাছে কি কোনো পুরোনো প্রেসক্রিপশন বা রিপোর্ট আছে? ছবি তুলুন।',
+              te: 'మీ వద్ద పాత ప్రిస్క్రిప్షన్లు లేదా రిపోర్టులు ఉన్నాయా? ఫోటో తీయండి.',
+            })}
           </p>
 
           {/* Hidden Device Camera Input */}
@@ -499,9 +537,14 @@ export const ScreenScan: React.FC = () => {
             >
               <span className="text-3xl sm:text-4xl">📸</span>
               <span>
-                {language === 'hi'
-                  ? 'फ़ोटो खींचें (Take Photo)'
-                  : 'Take Document Photo'}
+                {locText({
+                  en: 'Take Document Photo',
+                  hi: 'फ़ोटो खींचें (Take Photo)',
+                  mr: 'फोटो काढा (Take Photo)',
+                  ta: 'புகைப்படமெடுக்கவும்',
+                  bn: 'ছবি তুলুন (Take Photo)',
+                  te: 'ఫోటో తీయండి (Take Photo)',
+                })}
               </span>
             </button>
 
@@ -514,7 +557,14 @@ export const ScreenScan: React.FC = () => {
                 disabled={isProcessing}
                 className="text-xs font-bold text-teal-800 bg-teal-50 hover:bg-teal-100 px-3.5 py-2 rounded-xl border border-teal-200 cursor-pointer transition-all"
               >
-                ⚡ नमूना पर्चा जोड़ें (Demo Rx)
+                {locText({
+                  en: '⚡ Demo Prescription (Rx)',
+                  hi: '⚡ नमूना पर्चा जोड़ें (Demo Rx)',
+                  mr: '⚡ नमुना औषधपत्रिका (Demo Rx)',
+                  ta: '⚡ மாதிரி மருந்துக் குறிப்பு',
+                  bn: '⚡ ডেমো প্রেসক্রিপশন',
+                  te: '⚡ డెమో ప్రిస్క్రిప్షన్',
+                })}
               </button>
               <button
                 id="btn-sample-lab"
@@ -523,7 +573,14 @@ export const ScreenScan: React.FC = () => {
                 disabled={isProcessing}
                 className="text-xs font-bold text-sky-800 bg-sky-50 hover:bg-sky-100 px-3.5 py-2 rounded-xl border border-sky-200 cursor-pointer transition-all"
               >
-                🧪 नमूना लैब रिपोर्ट (Demo Lab)
+                {locText({
+                  en: '🧪 Demo Lab Report',
+                  hi: '🧪 नमूना लैब रिपोर्ट (Demo Lab)',
+                  mr: '🧪 नमुना लॅब रिपोर्ट (Demo Lab)',
+                  ta: '🧪 மாதிரி ஆய்வக அறிக்கை',
+                  bn: '🧪 ডেমো ল্যাব রিপোর্ট',
+                  te: '🧪 డెమో ల్యాబ్ రిపోర్ట్',
+                })}
               </button>
             </div>
           </div>
@@ -534,9 +591,11 @@ export const ScreenScan: React.FC = () => {
               <div className="inline-block animate-spin text-3xl mb-2">⚙️</div>
               <p className="text-lg font-bold text-teal-950">{processingStatusText}</p>
               <p className="text-xs font-semibold text-slate-500 mt-1">
-                {language === 'hi'
-                  ? 'कृपया एक क्षण प्रतीक्षा करें...'
-                  : 'Please wait a moment while AI processes your document...'}
+                {locText({
+                  mr: 'कृपया काही क्षण थांबा...',
+                  hi: 'कृपया एक क्षण प्रतीक्षा करें...',
+                  en: 'Please wait a moment while AI processes your document...',
+                })}
               </p>
             </div>
           )}
@@ -555,13 +614,19 @@ export const ScreenScan: React.FC = () => {
                 <span className="text-base sm:text-lg font-bold text-teal-950 flex items-center gap-2">
                   <span>📂</span>
                   <span>
-                    {language === 'hi'
-                      ? `स्कैन किए गए दस्तावेज़ (${documents.length})`
-                      : `Scanned Documents (${documents.length})`}
+                    {locText({
+                      mr: `स्कॅन केलेली कागदपत्रे (${documents.length})`,
+                      hi: `स्कैन किए गए दस्तावेज़ (${documents.length})`,
+                      en: `Scanned Documents (${documents.length})`,
+                    })}
                   </span>
                 </span>
                 <span className="text-xs font-bold text-teal-700 bg-teal-50 px-2.5 py-1 rounded-lg">
-                  {language === 'hi' ? 'तारीख अनुसार व्यवस्थित' : 'Auto-sorted by Date'}
+                  {locText({
+                    mr: 'तारीखानुसार क्रमवारी लावलेली',
+                    hi: 'तारीख अनुसार व्यवस्थित',
+                    en: 'Auto-sorted by Date',
+                  })}
                 </span>
               </div>
 
@@ -601,15 +666,11 @@ export const ScreenScan: React.FC = () => {
                             }`}
                           >
                             {isRx
-                              ? language === 'hi'
-                                ? 'पर्चा (Prescription)'
-                                : 'Prescription'
-                              : language === 'hi'
-                              ? 'लैब रिपोर्ट (Lab Report)'
-                              : 'Lab Report'}
+                              ? locText({ en: 'Prescription', hi: 'पर्चा (Prescription)', mr: 'प्रिस्क्रिप्शन', ta: 'மருந்துக் குறிப்பு', bn: 'প্রেসক্রিপশন', te: 'ప్రిస్క్రిప్షన్' })
+                              : locText({ en: 'Lab Report', hi: 'लैब रिपोर्ट (Lab Report)', mr: 'लॅब रिपोर्ट', ta: 'ஆய்வக அறிக்கை', bn: 'ল্যাব রিপোর্ট', te: 'ల్యాబ్ రిపోర్ట్' })}
                           </span>
                           <span className="text-xs font-bold text-emerald-700">
-                            ✓ {language === 'hi' ? 'जाँचा गया' : 'Digitized'}
+                            ✓ {locText({ en: 'Digitized', hi: 'जाँचा गया', mr: 'स्कॅन झाले', ta: 'டிஜிட்டல் செய்யப்பட்டது', bn: 'ডিজিটাইজড', te: 'డిజిటైజ్ చేయబడింది' })}
                           </span>
                         </div>
 
@@ -623,7 +684,7 @@ export const ScreenScan: React.FC = () => {
                         <div className="text-xs text-slate-700 font-medium space-y-0.5">
                           {medCount > 0 && (
                             <p className="truncate">
-                              💊 <b>{medCount} दवाइयाँ:</b>{' '}
+                              💊 <b>{medCount} {locText({ en: 'Medications:', hi: 'दवाइयाँ:', mr: 'औषधे:', ta: 'மருந்துகள்:', bn: 'ওষুধ:', te: 'మందులు:' })}</b>{' '}
                               {doc.structuredJson?.medications
                                 .map((m) => m.name)
                                 .slice(0, 2)
@@ -632,7 +693,7 @@ export const ScreenScan: React.FC = () => {
                           )}
                           {labCount > 0 && (
                             <p className="truncate">
-                              🔬 <b>{labCount} टेस्ट:</b>{' '}
+                              🔬 <b>{labCount} {locText({ en: 'Tests:', hi: 'जाँचें:', mr: 'तपासण्या:', ta: 'சோதனைகள்:', bn: 'পরীক্ষা:', te: 'పరీక్షలు:' })}</b>{' '}
                               {doc.structuredJson?.lab_results
                                 .map((l) => `${l.test} (${l.value})`)
                                 .slice(0, 2)
@@ -648,7 +709,7 @@ export const ScreenScan: React.FC = () => {
                             onClick={() => setActivePreviewDoc(doc)}
                             className="text-xs font-bold text-teal-700 hover:text-teal-900 underline cursor-pointer"
                           >
-                            {language === 'hi' ? 'विवरण देखें' : 'View Extracted'}
+                            {locText({ en: 'View Extracted', hi: 'विवरण देखें', mr: 'तपशील पहा', ta: 'விவரங்களைப் பார்', bn: 'বিস্তারিত দেখুন', te: 'వివరాలు చూడండి' })}
                           </button>
                           <button
                             id={`btn-delete-doc-${idx}`}
@@ -656,7 +717,7 @@ export const ScreenScan: React.FC = () => {
                             onClick={() => handleDeleteDocument(doc.id, doc.storagePath)}
                             className="text-xs font-bold text-red-600 hover:text-red-800 cursor-pointer"
                           >
-                            🗑️ {language === 'hi' ? 'हटाएँ' : 'Delete'}
+                            🗑️ {locText({ en: 'Delete', hi: 'हटाएँ', mr: 'हटवा', ta: 'நீக்கு', bn: 'মুছুন', te: 'తొలగించు' })}
                           </button>
                         </div>
                       </div>
@@ -677,7 +738,7 @@ export const ScreenScan: React.FC = () => {
                       {activePreviewDoc.docType === 'prescription' ? '📄' : '🧪'}
                     </span>
                     <h3 className="text-xl font-bold text-teal-950">
-                      {language === 'hi' ? 'पहचाने गए विवरण' : 'Extracted Details'}
+                      {locText({ en: 'Extracted Details', hi: 'पहचाने गए विवरण', mr: 'तपशील', ta: 'பிரித்தெடுக்கப்பட்ட விவரங்கள்', bn: 'নিষ্কাশিত বিবরণ', te: 'సేకరించిన వివరాలు' })}
                     </h3>
                   </div>
                   <button
@@ -691,7 +752,7 @@ export const ScreenScan: React.FC = () => {
 
                 {activePreviewDoc.dateOnDocument && (
                   <p className="text-sm font-semibold text-slate-500 mb-3">
-                    📅 दस्तावेज़ की तारीख:{' '}
+                    📅 {locText({ en: 'Document Date:', hi: 'दस्तावेज़ की तारीख:', mr: 'कागदपत्राची तारीख:', ta: 'ஆவண தேதி:', bn: 'নথির তারিখ:', te: 'పత్రం తేదీ:' })}{' '}
                     <span className="text-slate-900 font-bold">
                       {activePreviewDoc.dateOnDocument}
                     </span>
@@ -703,7 +764,7 @@ export const ScreenScan: React.FC = () => {
                   activePreviewDoc.structuredJson.diagnoses.length > 0 && (
                     <div className="mb-4">
                       <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                        {language === 'hi' ? 'बीमारियाँ (Diagnoses):' : 'Diagnoses:'}
+                        {locText({ en: 'Diagnoses:', hi: 'बीमारियाँ (Diagnoses):', mr: 'निदान:', ta: 'நோயறிதல்கள்:', bn: 'রোগ নির্ণয়:', te: 'వ్యాధి నిర్ధారణలు:' })}
                       </h4>
                       <div className="flex flex-wrap gap-1.5">
                         {activePreviewDoc.structuredJson.diagnoses.map((d, i) => (
@@ -723,7 +784,7 @@ export const ScreenScan: React.FC = () => {
                   activePreviewDoc.structuredJson.medications.length > 0 && (
                     <div className="mb-4">
                       <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                        {language === 'hi' ? 'दवाइयाँ (Medications):' : 'Medications:'}
+                        {locText({ en: 'Medications:', hi: 'दवाइयाँ (Medications):', mr: 'औषधे:', ta: 'மருந்துகள்:', bn: 'ওষুধ:', te: 'మందులు:' })}
                       </h4>
                       <div className="space-y-2">
                         {activePreviewDoc.structuredJson.medications.map((m, i) => (
@@ -744,7 +805,7 @@ export const ScreenScan: React.FC = () => {
                   activePreviewDoc.structuredJson.lab_results.length > 0 && (
                     <div className="mb-4">
                       <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                        {language === 'hi' ? 'जाँच रिपोर्ट (Lab Results):' : 'Lab Results:'}
+                        {locText({ en: 'Lab Results:', hi: 'जाँच रिपोर्ट (Lab Results):', mr: 'तपासणी अहवाल:', ta: 'ஆய்வக முடிவுகள்:', bn: 'ল্যাব ফলাফল:', te: 'ల్యాబ్ ఫలితాలు:' })}
                       </h4>
                       <div className="space-y-2">
                         {activePreviewDoc.structuredJson.lab_results.map((l, i) => (
@@ -777,7 +838,7 @@ export const ScreenScan: React.FC = () => {
                   onClick={() => setActivePreviewDoc(null)}
                   className="w-full mt-2 py-3 rounded-xl bg-teal-700 text-white font-bold text-base cursor-pointer hover:bg-teal-800"
                 >
-                  {language === 'hi' ? 'बंद करें' : 'Close'}
+                  {locText({ en: 'Close', hi: 'बंद करें', mr: 'बंद करा', ta: 'மூடு', bn: 'বন্ধ করুন', te: 'మూసివేయండి' })}
                 </button>
               </div>
             </div>
@@ -793,7 +854,16 @@ export const ScreenScan: React.FC = () => {
               disabled={isProcessing}
               className="w-full sm:w-auto px-6 py-3.5 rounded-2xl border-2 border-slate-300 text-slate-600 hover:text-slate-900 hover:bg-slate-100 font-bold text-base cursor-pointer transition-all text-center min-h-[56px]"
             >
-              <span>{language === 'hi' ? 'आगे बढ़ें, कोई पर्चा नहीं है' : "Skip, I don't have any"}</span>
+              <span>
+                {locText({
+                  en: "Skip, I don't have any",
+                  hi: 'आगे बढ़ें, कोई पर्चा नहीं है',
+                  mr: 'पुढे जा, जुने कागदपत्रे नाहीत',
+                  ta: 'தவிர்க்கவும், எதுவுமில்லை',
+                  bn: 'এড়িয়ে যান, আমার নেই',
+                  te: 'స్కిప్ చేయండి, నా వద్ద లేవు',
+                })}
+              </span>
               <span className="ml-2">➔</span>
             </button>
 
@@ -807,9 +877,14 @@ export const ScreenScan: React.FC = () => {
                 className="w-full sm:w-auto flex-1 px-8 py-4 rounded-2xl bg-teal-700 hover:bg-teal-800 text-white font-extrabold text-lg sm:text-xl shadow-lg hover:shadow-xl active:scale-98 transition-all flex items-center justify-center gap-3 cursor-pointer min-h-[56px]"
               >
                 <span>
-                  {language === 'hi'
-                    ? 'अगला चरण: डॉक्टर सारांश देखें'
-                    : 'Continue to Summary'}
+                  {locText({
+                    en: 'Continue to Summary',
+                    hi: 'अगला चरण: डॉक्टर सारांश देखें',
+                    mr: 'पुढील पायरी: नोंदणी सारांश पहा',
+                    ta: 'அடுத்த படிக்குச் செல்லவும்',
+                    bn: 'পরবর্তী ধাপে যান',
+                    te: 'తరువాతి దశకు కొనసాగండి',
+                  })}
                 </span>
                 <span className="text-2xl">➔</span>
               </button>
