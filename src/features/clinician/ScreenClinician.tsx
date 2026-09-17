@@ -8,6 +8,7 @@ import {
   StructuredClinicalSummary,
   ClinicalSummaryRecord,
 } from '../../services/summaryService'
+import { RxPad } from '../../components/RxPad'
 
 interface SessionItem {
   id: string
@@ -50,6 +51,10 @@ export const ScreenClinician: React.FC = () => {
   const [physicianNotes, setPhysicianNotes] = useState<string>('')
   const [isSavingEdit, setIsSavingEdit] = useState<boolean>(false)
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null)
+
+  // RxPad State
+  const [showRxPad, setShowRxPad] = useState<boolean>(false)
+  const [rxSavedMsg, setRxSavedMsg] = useState<string | null>(null)
 
   // 1. Fetch available patient sessions
   const loadSessions = useCallback(async () => {
@@ -419,7 +424,7 @@ export const ScreenClinician: React.FC = () => {
           </button>
         </div>
 
-        {/* Patient Identity Pills */}
+        {/* Patient Identity Pills + Write Rx button */}
         {activeSessionItem && (
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-black text-teal-950 bg-teal-50 border border-teal-200 px-3 py-1 rounded-xl">
@@ -442,6 +447,25 @@ export const ScreenClinician: React.FC = () => {
                 🏥 General OPD
               </span>
             )}
+
+            {/* ── Write Prescription (RxPad) Button ── */}
+            <button
+              id="btn-open-rxpad"
+              type="button"
+              onClick={() => setShowRxPad(true)}
+              className="ml-auto flex items-center gap-2 px-4 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-extrabold text-xs sm:text-sm shadow-md cursor-pointer transition-colors active:scale-95"
+            >
+              <span className="text-base">℞</span>
+              <span>Write Prescription</span>
+            </button>
+          </div>
+        )}
+
+        {/* Rx Saved confirmation badge */}
+        {rxSavedMsg && (
+          <div className="bg-teal-50 border border-teal-300 text-teal-800 text-xs font-bold px-4 py-2 rounded-xl flex items-center gap-2">
+            <span>✓</span><span>{rxSavedMsg}</span>
+            <button onClick={() => setRxSavedMsg(null)} className="ml-auto text-teal-600 hover:text-teal-900 cursor-pointer">✕</button>
           </div>
         )}
       </div>
@@ -881,6 +905,36 @@ export const ScreenClinician: React.FC = () => {
           )}
         </div>
       </main>
+
+      {/* ── RXPAD PRESCRIPTION MODAL ─────────────────────────────────── */}
+      {showRxPad && (
+        <RxPad
+          patientName={activePatient?.name || 'Walk-in Patient'}
+          patientId={activePatient?.abha_id || activePatient?.id?.slice(0, 8).toUpperCase() || '—'}
+          sessionId={selectedSessionId}
+          department={
+            activeSessionItem?.department === 'ayush' ? 'AYUSH (Ayurveda) OPD' : 'General Medicine OPD'
+          }
+          onSave={(rxText) => {
+            setShowRxPad(false)
+            setRxSavedMsg(`Prescription saved for ${activePatient?.name || 'patient'} at ${new Date().toLocaleTimeString('en-IN')}`)
+            // Optionally persist to Supabase physician_notes
+            if (selectedSessionId) {
+              supabase
+                .from('clinical_summaries')
+                .upsert(
+                  { session_id: selectedSessionId, physician_notes: rxText, physician_edited: true },
+                  { onConflict: 'session_id' }
+                )
+                .then(({ error }) => {
+                  if (error) console.warn('Could not save Rx to session:', error.message)
+                })
+            }
+          }}
+          onClose={() => setShowRxPad(false)}
+        />
+      )}
     </div>
   )
 }
+

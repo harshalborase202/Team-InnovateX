@@ -10,6 +10,7 @@ import {
 import { speechRecognitionService } from '../../services/speechRecognition'
 import { supabase } from '../../lib/supabase'
 import { RedFlagAlert } from './RedFlagAlert'
+import { BodyPainMap } from '../../components/BodyPainMap'
 
 export const ScreenConverse: React.FC = () => {
   const navigate = useNavigate()
@@ -53,6 +54,9 @@ export const ScreenConverse: React.FC = () => {
   // Text input fallback state (allows typing if microphone is unsupported/noisy)
   const [manualText, setManualText] = useState<string>('')
   const [showManualInput, setShowManualInput] = useState<boolean>(false)
+
+  // Body Pain Map toggle — shown when a pain-location question is active
+  const [showBodyMap, setShowBodyMap] = useState<boolean>(false)
 
   // Reference to prevent duplicate initial fetches
   const initialFetchDone = useRef(false)
@@ -289,6 +293,18 @@ export const ScreenConverse: React.FC = () => {
     await fetchQuestion(updatedHistory)
   }
 
+  // Body map handler — converts selected zones into an answer text and submits
+  const handleBodyMapComplete = (summary: string, _rawIds: string[]) => {
+    setShowBodyMap(false)
+    const answerText =
+      language === 'mr'
+        ? `मला खालील ठिकाणी दुखत आहे: ${summary}`
+        : language === 'hi'
+        ? `मुझे इन जगहों पर दर्द है: ${summary}`
+        : `I have pain in: ${summary}`
+    handleAnswer(answerText, 'touch')
+  }
+
   // Complete interview and advance to Step 3 (Scan)
   const handleCompleteInterview = async () => {
     const sessionId = currentSession?.id
@@ -515,6 +531,41 @@ export const ScreenConverse: React.FC = () => {
               </button>
             ))}
           </div>
+
+          {/* ── BODY PAIN MAP TOGGLE — visible for pain/location questions ── */}
+          {!loadingNext && currentTurn && (
+            currentTurn.field_key === 'chief_complaint' ||
+            currentTurn.field_key === 'pain_location' ||
+            currentTurn.field_key === 'symptom_location'
+          ) && (
+            <div className="w-full mb-4">
+              {!showBodyMap ? (
+                <button
+                  id="btn-open-body-map"
+                  type="button"
+                  onClick={() => setShowBodyMap(true)}
+                  className="w-full py-3.5 px-4 rounded-2xl bg-amber-50 border-2 border-amber-300 text-amber-900 font-bold text-base hover:bg-amber-100 flex items-center justify-center gap-3 cursor-pointer transition-colors shadow-xs"
+                >
+                  <span className="text-2xl">🫀</span>
+                  <span>
+                    {language === 'mr'
+                      ? 'शरीरावर दुखणाऱ्या जागा दाखवा (Body Map)'
+                      : language === 'hi'
+                      ? 'शरीर पर दर्द की जगह दिखाएँ (Body Map)'
+                      : 'Show pain on body diagram (Body Map)'}
+                  </span>
+                </button>
+              ) : (
+                <div className="w-full bg-white rounded-3xl border-2 border-amber-200 p-5 shadow-lg">
+                  <BodyPainMap
+                    language={language}
+                    onSelectionComplete={handleBodyMapComplete}
+                    onSkip={() => setShowBodyMap(false)}
+                  />
+                </div>
+              )}
+            </div>
+          )}
 
           {/* ── BIG MICROPHONE SPEAK BUTTON ─────────────────────────────── */}
           {currentTurn?.allow_free_voice !== false && (

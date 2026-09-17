@@ -4,6 +4,7 @@ import { useKiosk } from '../../context/KioskContext'
 import { KioskHeader } from '../../components/KioskHeader'
 import { generateAndSaveSummary } from '../../services/summaryService'
 import { supabase } from '../../lib/supabase'
+import { OpdTokenReceipt } from '../../components/OpdTokenReceipt'
 
 export const ScreenSummary: React.FC = () => {
   const navigate = useNavigate()
@@ -19,6 +20,7 @@ export const ScreenSummary: React.FC = () => {
 
   const [tokenNumber, setTokenNumber] = useState<string>('OPD-101')
   const [departmentName, setDepartmentName] = useState<string>('General OPD')
+  const [showReceipt, setShowReceipt] = useState(false)
   const initialTriggerDone = useRef(false)
 
   // Calming audio confirmation on screen load
@@ -224,23 +226,54 @@ export const ScreenSummary: React.FC = () => {
           </div>
         </div>
 
-        {/* Audio Replay helper */}
-        <button
-          type="button"
-          onClick={() =>
-            playAudio(
-              language === 'mr'
-                ? 'धन्यवाद! तुमची माहिती नोंदवली आहे. कृपया पाचारण होईपर्यंत थांबा.'
+        {/* Audio Replay + Print Receipt row */}
+        <div className="flex flex-wrap items-center justify-center gap-3 mb-6">
+          <button
+            type="button"
+            onClick={() =>
+              playAudio(
+                language === 'mr'
+                  ? 'धन्यवाद! तुमची माहिती नोंदवली आहे. कृपया पाचारण होईपर्यंत थांबा.'
+                  : language === 'hi'
+                  ? 'धन्यवाद! आपकी जानकारी दर्ज कर ली गई है। कृपया बुलाए जाने की प्रतीक्षा करें।'
+                  : 'Thank you, your information has been recorded. Please wait to be called.'
+              )
+            }
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 font-semibold text-sm hover:bg-slate-50 shadow-xs cursor-pointer"
+          >
+            <span>🔊</span>
+            <span>{language === 'mr' ? 'आवाज पुन्हा ऐका' : language === 'hi' ? 'आवाज़ दोबारा सुनें' : 'Listen Again'}</span>
+          </button>
+
+          <button
+            id="btn-print-receipt"
+            type="button"
+            onClick={() => setShowReceipt(true)}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-teal-50 border-2 border-teal-200 text-teal-800 font-bold text-sm hover:bg-teal-100 shadow-xs cursor-pointer transition-colors"
+          >
+            <span>🖨️</span>
+            <span>
+              {language === 'mr'
+                ? 'टोकन पावती छापा'
                 : language === 'hi'
-                ? 'धन्यवाद! आपकी जानकारी दर्ज कर ली गई है। कृपया बुलाए जाने की प्रतीक्षा करें।'
-                : 'Thank you, your information has been recorded. Please wait to be called.'
-            )
-          }
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 font-semibold text-sm hover:bg-slate-50 mb-6 shadow-xs cursor-pointer"
-        >
-          <span>🔊</span>
-          <span>{language === 'mr' ? 'आवाज पुन्हा ऐका' : language === 'hi' ? 'आवाज़ दोबारा सुनें' : 'Listen Again'}</span>
-        </button>
+                ? 'टोकन पर्ची प्रिंट करें'
+                : 'Print Token Receipt'}
+            </span>
+          </button>
+        </div>
+
+        {/* OPD Token Receipt Modal */}
+        {showReceipt && (
+          <OpdTokenReceipt
+            tokenNumber={tokenNumber}
+            patientName={currentPatient?.name || (language === 'mr' ? 'नोंदणीकृत रुग्ण' : 'Walk-in Patient')}
+            departmentName={departmentName}
+            roomInfo={language === 'mr' ? 'खोली क्र. ४ • डॉ. शर्मा' : language === 'hi' ? 'कमरा नं. ४ • डॉ. शर्मा' : 'Room No. 4 • Dr. Sharma'}
+            sessionDate={new Date().toLocaleString(language === 'mr' ? 'mr-IN' : language === 'hi' ? 'hi-IN' : 'en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
+            language={language}
+            onClose={() => setShowReceipt(false)}
+          />
+        )}
 
         {/* ── ACTION BUTTONS ───────────────────────────────────────────── */}
         <div className="w-full max-w-md flex flex-col gap-3">
