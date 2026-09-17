@@ -6,6 +6,7 @@ import {
 } from '../services/translations'
 import { speechService } from '../services/speech'
 import { Patient, Session } from '../types/database'
+import { triggerSosIncident, SosAlert } from '../services/sosService'
 
 export type TextSize = 'normal' | 'large' | 'extra-large'
 
@@ -37,6 +38,8 @@ interface KioskContextType {
   callForHelp: () => void
   isRedFlagActive: boolean
   setIsRedFlagActive: (active: boolean) => void
+  activeSosIncident: SosAlert | null
+  clearSosIncident: () => void
 }
 
 const KioskContext = createContext<KioskContextType | null>(null)
@@ -161,6 +164,7 @@ export const KioskProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false)
   const [isHelpModalOpen, setIsHelpModalOpen] = useState<boolean>(false)
   const [isRedFlagActive, setIsRedFlagActive] = useState<boolean>(false)
+  const [activeSosIncident, setActiveSosIncident] = useState<SosAlert | null>(null)
 
   const setTextSize = useCallback((size: TextSize) => {
     setTextSizeState(size)
@@ -192,9 +196,26 @@ export const KioskProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   const callForHelp = useCallback(() => {
     setIsHelpModalOpen(true)
-    const alertVoice = t('helpAudioNotice') || 'Hospital staff member has been alerted. Please remain seated, an assistant is on their way.'
+    const alertVoice =
+      t('helpAudioNotice') ||
+      'Hospital staff member has been alerted. Please remain seated, an assistant is on their way.'
     playAudio(alertVoice)
-  }, [t, playAudio])
+
+    // Fire real SOS — write to Supabase + BroadcastChannel + play chime
+    triggerSosIncident(
+      currentSession?.id ?? null,
+      currentPatient?.name ?? null,
+      (currentSession as any)?.token_number ?? null,
+      language
+    ).then((incident) => {
+      setActiveSosIncident(incident)
+    }).catch(console.warn)
+  }, [t, playAudio, currentSession, currentPatient, language])
+
+
+  const clearSosIncident = useCallback(() => {
+    setActiveSosIncident(null)
+  }, [])
 
   return (
     <KioskContext.Provider
@@ -224,6 +245,8 @@ export const KioskProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         callForHelp,
         isRedFlagActive,
         setIsRedFlagActive,
+        activeSosIncident,
+        clearSosIncident,
       }}
     >
       {children}
