@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { useKiosk } from '../../context/KioskContext'
@@ -11,6 +11,17 @@ import {
 import { RxPad } from '../../components/RxPad'
 import { BodyPainMap } from '../../components/BodyPainMap'
 import type { TriageResult } from '../../services/triageEngine'
+import {
+  acknowledgeSosIncident,
+  playEmergencyChime,
+  getLocalSosAlerts,
+  dismissLocalSosAlert,
+  fetchRecentSosAlerts,
+  triggerSosIncident,
+  SOS_CHANNEL_NAME,
+  SosAlert,
+  DEMO_STAFF,
+} from '../../services/sosService'
 
 interface SessionItem {
   id: string
@@ -59,6 +70,41 @@ export const ScreenClinician: React.FC = () => {
   const [rxSavedMsg, setRxSavedMsg] = useState<string | null>(null)
   const [showClinicianBodyMap, setShowClinicianBodyMap] = useState<boolean>(false)
 
+  // Real-time SOS Alert State & Emergency Console
+  const [liveSosAlerts, setLiveSosAlerts] = useState<SosAlert[]>(() => getLocalSosAlerts())
+  const [isSosConsoleOpen, setIsSosConsoleOpen] = useState<boolean>(false)
+  const sosChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
+
+  // Synchronize SOS alerts across local storage, BroadcastChannel, and Supabase DB
+  const syncSosAlerts = useCallback(async () => {
+    const local = getLocalSosAlerts()
+    let remote: SosAlert[] = []
+    try {
+      remote = await fetchRecentSosAlerts()
+    } catch { /* ignore */ }
+
+    const map = new Map<string, SosAlert>()
+    local.forEach((a) => map.set(a.incidentId, a))
+    remote.forEach((r) => {
+      const existing = map.get(r.incidentId)
+      if (existing) {
+        map.set(r.incidentId, {
+          ...existing,
+          ...r,
+          acknowledged: existing.acknowledged || r.acknowledged,
+          acknowledgedAt: existing.acknowledgedAt || r.acknowledgedAt,
+        })
+      } else {
+        map.set(r.incidentId, r)
+      }
+    })
+
+    const merged = Array.from(map.values()).sort(
+      (a, b) => new Date(b.triggeredAt).getTime() - new Date(a.triggeredAt).getTime()
+    )
+    setLiveSosAlerts(merged)
+  }, [])
+
   // 1. Fetch available patient sessions
   const loadSessions = useCallback(async () => {
     try {
@@ -81,8 +127,128 @@ export const ScreenClinician: React.FC = () => {
   useEffect(() => {
     if (isAuthenticated) {
       loadSessions()
+      syncSosAlerts()
     }
-  }, [isAuthenticated, loadSessions])
+  }, [isAuthenticated, loadSessions, syncSosAlerts])
+
+  // ── Multi-channel Emergency SOS Alert listener (BroadcastChannel + Storage + Realtime) ──
+  useEffect(() => {
+    if (!isAuthenticated) return
+
+    // 1. Listen on BroadcastChannel for instant cross-tab alerts
+    let bc: BroadcastChannel | null = null
+    try {
+      bc = new BroadcastChannel(SOS_CHANNEL_NAME)
+      bc.onmessage = (e) => {
+        if (e.data?.type === 'SOS_NEW' && e.data.alert) {
+          playEmergencyChime()
+          setLiveSosAlerts((prev) => {
+            const exists = prev.some((a) => a.incidentId === e.data.alert.incidentId)
+            if (exists) return prev
+            return [e.data.alert, ...prev]
+          })
+        } else if (e.data?.type === 'SOS_ACKNOWLEDGED') {
+          setLiveSosAlerts((prev) =>
+            prev.map((a) =>
+              a.redFlagDbId === e.data.redFlagDbId || a.incidentId === e.data.redFlagDbId
+                ? {
+                    ...a,
+                    acknowledged: true,
+                    acknowledgedBy: e.data.by,
+                    acknowledgedAt: e.data.at,
+                  }
+                : a
+            )
+          )
+        }
+      }
+    } catch { /* BroadcastChannel fallback */ }
+
+    // 2. Window storage & custom events
+    const handleUpdateEvent = () => {
+      syncSosAlerts()
+    }
+    window.addEventListener('medikiosk-sos-updated', handleUpdateEvent)
+    window.addEventListener('storage', handleUpdateEvent)
+
+    // 3. 6-second heartbeat polling for DB updates
+    const pollInterval = setInterval(() => {
+      syncSosAlerts()
+    }, 6000)
+
+    // 4. Supabase Realtime channel
+    const channel = supabase
+      .channel('sos-live-alerts')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'red_flags', filter: 'severity=eq.critical' },
+        (payload) => {
+          const row = payload.new as any
+          if (row.flag_type === 'sos_call_for_help') {
+            playEmergencyChime()
+            syncSosAlerts()
+          }
+        }
+      )
+      .subscribe()
+
+    sosChannelRef.current = channel
+
+    return () => {
+      if (bc) bc.close()
+      window.removeEventListener('medikiosk-sos-updated', handleUpdateEvent)
+      window.removeEventListener('storage', handleUpdateEvent)
+      clearInterval(pollInterval)
+      supabase.removeChannel(channel)
+      sosChannelRef.current = null
+    }
+  }, [isAuthenticated, syncSosAlerts])
+
+  // Handler: Acknowledge an SOS alert from clinician side
+  const handleAcknowledgeSos = useCallback(
+    async (alertIdentifier: string) => {
+      const docName = 'Dr. S. Sharma, MD (Attending Physician)'
+      await acknowledgeSosIncident(alertIdentifier, docName, clinicianUserId)
+      setLiveSosAlerts((prev) =>
+        prev.map((a) =>
+          a.incidentId === alertIdentifier || a.redFlagDbId === alertIdentifier
+            ? {
+                ...a,
+                acknowledged: true,
+                acknowledgedBy: docName,
+                acknowledgedAt: new Date().toISOString(),
+              }
+            : a
+        )
+      )
+    },
+    [clinicianUserId]
+  )
+
+  // Handler: Dismiss / Archive an SOS alert
+  const handleDismissSos = useCallback((alertIdentifier: string) => {
+    dismissLocalSosAlert(alertIdentifier)
+    setLiveSosAlerts((prev) =>
+      prev.filter((a) => a.incidentId !== alertIdentifier && a.redFlagDbId !== alertIdentifier)
+    )
+  }, [])
+
+  // Handler: Trigger live demo simulation SOS from clinician screen
+  const handleSimulateDemoSos = useCallback(async () => {
+    const activeItem = sessions.find((s) => s.id === selectedSessionId) || currentSession
+    const patientName =
+      (Array.isArray(activeItem?.patients) ? activeItem?.patients[0]?.name : activeItem?.patients?.name) ||
+      'Sunil Gavaskar'
+    const token = activeItem?.token_number || 'T-102'
+
+    const simulated = await triggerSosIncident(
+      selectedSessionId || null,
+      patientName,
+      token,
+      language
+    )
+    setLiveSosAlerts((prev) => [simulated, ...prev.filter((a) => a.incidentId !== simulated.incidentId)])
+  }, [sessions, selectedSessionId, currentSession, language])
 
   // Accessibility screen audio announcement
   useEffect(() => {
@@ -353,6 +519,36 @@ export const ScreenClinician: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2 sm:gap-3">
+          {/* Emergency SOS Monitor Button */}
+          <button
+            id="btn-clinician-sos-monitor"
+            onClick={() => setIsSosConsoleOpen(true)}
+            type="button"
+            className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-black border transition-all cursor-pointer min-h-[48px] shadow-sm active:scale-95 ${
+              liveSosAlerts.some((a) => !a.acknowledged)
+                ? 'bg-rose-600 text-white border-rose-400 animate-pulse hover:bg-rose-700'
+                : liveSosAlerts.length > 0
+                ? 'bg-amber-950 text-amber-200 border-amber-600 hover:bg-amber-900'
+                : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700 hover:text-white'
+            }`}
+            title="Open Hospital Emergency SOS Monitor"
+            aria-label="Hospital Emergency SOS Monitor"
+          >
+            <span className="text-base" role="img" aria-hidden="true">🚨</span>
+            <span className="hidden md:inline font-black">
+              {liveSosAlerts.some((a) => !a.acknowledged) ? 'SOS EMERGENCY' : 'SOS Monitor'}
+            </span>
+            <span
+              className={`px-2 py-0.5 rounded-full text-xs font-mono font-black ${
+                liveSosAlerts.some((a) => !a.acknowledged)
+                  ? 'bg-white text-rose-700 animate-bounce'
+                  : 'bg-slate-700 text-slate-200'
+              }`}
+            >
+              {liveSosAlerts.filter((a) => !a.acknowledged).length}
+            </span>
+          </button>
+
           <button
             id="btn-clinician-replay-audio"
             onClick={replayAudio}
@@ -401,6 +597,66 @@ export const ScreenClinician: React.FC = () => {
           </button>
         </div>
       </header>
+
+      {/* ── LIVE SOS ALERT BANNER (realtime from kiosk) ──────────────── */}
+      {liveSosAlerts.filter(a => !a.acknowledged).length > 0 && liveSosAlerts.filter(a => !a.acknowledged).slice(0, 2).map((alert) => (
+        <div
+          key={alert.incidentId}
+          className="px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3 border-b-2 shadow-lg bg-rose-700 border-rose-400 text-white animate-pulse-slow"
+          role="alert"
+          aria-live="assertive"
+        >
+          <div className="flex items-center gap-3 min-w-0">
+            <span className="text-3xl animate-bounce">🚨</span>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="bg-white text-rose-800 text-[10px] font-black uppercase px-2 py-0.5 rounded tracking-wider">
+                  Critical SOS Incident
+                </span>
+                <span className="font-mono text-xs font-bold text-rose-200">
+                  #{alert.incidentId}
+                </span>
+                <span className="text-xs text-rose-200">•</span>
+                <span className="text-xs font-extrabold text-white">
+                  📍 {alert.kioskId}
+                </span>
+              </div>
+              <p className="font-extrabold text-sm sm:text-base leading-snug mt-0.5">
+                Patient: <span className="underline decoration-white/60">{alert.patientName || 'Walk-in Patient'}</span> (Token: {alert.patientToken || '—'}) requested immediate emergency assistance!
+              </p>
+              <p className="text-xs text-rose-200 font-mono mt-0.5">
+                Triggered at {new Date(alert.triggeredAt).toLocaleTimeString('en-IN')}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              id={`btn-sos-acknowledge-${alert.incidentId}`}
+              type="button"
+              onClick={() => handleAcknowledgeSos(alert.incidentId)}
+              className="px-4 py-2 rounded-xl bg-white text-rose-800 font-black text-xs hover:bg-rose-50 cursor-pointer transition-colors shadow-md active:scale-95 flex items-center gap-1.5"
+            >
+              <span>✓</span>
+              <span>Acknowledge &amp; Dispatch Team</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsSosConsoleOpen(true)}
+              className="px-3 py-2 rounded-xl bg-rose-800/80 hover:bg-rose-900 text-white border border-rose-400 font-extrabold text-xs cursor-pointer transition-colors"
+            >
+              View Dispatch Details
+            </button>
+            <button
+              type="button"
+              onClick={() => handleDismissSos(alert.incidentId)}
+              className="w-8 h-8 rounded-full bg-white/20 hover:bg-white/30 text-white font-bold flex items-center justify-center cursor-pointer text-xs"
+              aria-label="Dismiss SOS alert"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      ))}
 
       {/* ── SUB-HEADER / PATIENT SESSION SELECTOR BAR ───────────────────── */}
       <div className="bg-white border-b border-slate-200 px-6 py-3 flex flex-wrap items-center justify-between gap-4 shadow-xs">
@@ -999,6 +1255,227 @@ export const ScreenClinician: React.FC = () => {
               }}
               onSkip={() => setShowClinicianBodyMap(false)}
             />
+          </div>
+        </div>
+      )}
+
+      {/* ── HOSPITAL EMERGENCY RESPONSE & SOS DISPATCH CONSOLE MODAL ── */}
+      {isSosConsoleOpen && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 text-white rounded-3xl border border-slate-700 shadow-2xl max-w-3xl w-full max-h-[92vh] overflow-y-auto flex flex-col">
+            {/* Console Header */}
+            <div className="p-6 border-b border-slate-800 bg-gradient-to-r from-rose-950 via-slate-900 to-slate-900 flex items-start justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-2xl animate-pulse">🚨</span>
+                  <span className="text-xs font-black uppercase tracking-widest px-2.5 py-0.5 rounded-full bg-rose-600/30 text-rose-300 border border-rose-500/40">
+                    Emergency Dispatch System
+                  </span>
+                </div>
+                <h2 className="text-xl font-black tracking-tight text-white">
+                  Hospital Emergency &amp; Patient SOS Monitor
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Real-time telemetry and responder dispatch tracking from OPD Kiosks &amp; Waiting Zones
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  id="btn-simulate-sos-demo"
+                  type="button"
+                  onClick={handleSimulateDemoSos}
+                  className="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-amber-950 font-black text-xs cursor-pointer shadow-md transition-all active:scale-95 flex items-center gap-1.5"
+                  title="Simulate a real patient pressing SOS at the Kiosk"
+                >
+                  <span>⚡</span>
+                  <span>Simulate SOS (Demo)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsSosConsoleOpen(false)}
+                  className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold flex items-center justify-center cursor-pointer text-sm"
+                  aria-label="Close SOS Console"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Console Body */}
+            <div className="p-6 space-y-6 flex-1 overflow-y-auto">
+              {/* Alert Count Stats Bar */}
+              <div className="grid grid-cols-3 gap-3">
+                <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-3.5 text-center">
+                  <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Active Emergency</span>
+                  <span className={`text-2xl font-black font-mono ${liveSosAlerts.filter(a => !a.acknowledged).length > 0 ? 'text-rose-400 animate-pulse' : 'text-slate-200'}`}>
+                    {liveSosAlerts.filter(a => !a.acknowledged).length}
+                  </span>
+                </div>
+                <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-3.5 text-center">
+                  <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Acknowledged / En Route</span>
+                  <span className="text-2xl font-black font-mono text-emerald-400">
+                    {liveSosAlerts.filter(a => a.acknowledged).length}
+                  </span>
+                </div>
+                <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-3.5 text-center">
+                  <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Total Recorded</span>
+                  <span className="text-2xl font-black font-mono text-teal-300">
+                    {liveSosAlerts.length}
+                  </span>
+                </div>
+              </div>
+
+              {/* Incidents List */}
+              {liveSosAlerts.length === 0 ? (
+                <div className="p-8 text-center bg-slate-800/40 border border-slate-800 rounded-2xl">
+                  <span className="text-4xl block mb-2">🟢</span>
+                  <h4 className="text-base font-extrabold text-white">All Clear — No Active SOS Incidents</h4>
+                  <p className="text-xs text-slate-400 max-w-md mx-auto mt-1 mb-4">
+                    Patients in the lobby can press the red "Call for Help" button on any kiosk. When triggered, immediate visual alarms, audio chimes, and dispatched responder telemetry will appear here.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleSimulateDemoSos}
+                    className="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-xs cursor-pointer shadow-md inline-flex items-center gap-2"
+                  >
+                    <span>🚨</span>
+                    <span>Trigger Test SOS Incident Now</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {liveSosAlerts.map((alert) => (
+                    <div
+                      key={alert.incidentId}
+                      className={`rounded-2xl border p-5 transition-all ${
+                        alert.acknowledged
+                          ? 'bg-slate-800/70 border-emerald-500/50'
+                          : 'bg-rose-950/40 border-rose-500 shadow-lg shadow-rose-950/50 ring-1 ring-rose-500/40'
+                      }`}
+                    >
+                      {/* Incident Header */}
+                      <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-700/80 mb-3">
+                        <div className="flex items-center gap-2.5">
+                          <span className="text-xl">
+                            {alert.acknowledged ? '✅' : '🚨'}
+                          </span>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono text-xs font-black text-rose-300">
+                                {alert.incidentId}
+                              </span>
+                              <span
+                                className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
+                                  alert.acknowledged
+                                    ? 'bg-emerald-900/60 text-emerald-300 border border-emerald-500/40'
+                                    : 'bg-rose-600 text-white animate-pulse'
+                                }`}
+                              >
+                                {alert.acknowledged ? 'Responders Dispatched' : 'Pending Response'}
+                              </span>
+                            </div>
+                            <span className="text-xs text-slate-300 font-semibold block mt-0.5">
+                              📍 {alert.kioskId}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="text-right">
+                          <span className="text-[11px] text-slate-400 block font-mono">
+                            {new Date(alert.triggeredAt).toLocaleTimeString('en-IN')}
+                          </span>
+                          {alert.acknowledged && alert.acknowledgedBy && (
+                            <span className="text-[10px] text-emerald-400 font-semibold">
+                              ✓ Ack by: {alert.acknowledgedBy}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Patient Context */}
+                      <div className="bg-slate-900/60 rounded-xl p-3 mb-3 border border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs">
+                        <div>
+                          <span className="text-slate-400 block text-[10px] uppercase font-bold">Patient Details</span>
+                          <span className="font-extrabold text-white text-sm">
+                            {alert.patientName || 'Walk-in Patient'}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 block text-[10px] uppercase font-bold">OPD Token</span>
+                          <span className="font-mono font-black text-teal-300">
+                            {alert.patientToken || '—'}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 block text-[10px] uppercase font-bold">Dispatch Status</span>
+                          <span className="font-extrabold text-amber-300">
+                            Code Blue Escort Active
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Dispatched Hospital Personnel Cards */}
+                      <div className="space-y-1.5 mb-4">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                          Automated Hospital Response Team Dispatched:
+                        </span>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          {(alert.staffDispatched || DEMO_STAFF).map((st, sIdx) => (
+                            <div key={sIdx} className="bg-slate-800/90 border border-slate-700 rounded-xl p-2.5 text-xs">
+                              <div className="flex items-center justify-between">
+                                <span className="font-black text-slate-200">{st.name}</span>
+                                <span className="text-[10px] font-mono font-bold text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded">
+                                  ETA ~{st.eta}s
+                                </span>
+                              </div>
+                              <span className="text-[10px] text-slate-400 block mt-0.5">{st.role}</span>
+                              <span className="text-[10px] text-teal-400 font-mono block mt-1">📞 {st.phone}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Clinician Action Buttons */}
+                      <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-700/60">
+                        {!alert.acknowledged && (
+                          <button
+                            id={`btn-modal-ack-${alert.incidentId}`}
+                            type="button"
+                            onClick={() => handleAcknowledgeSos(alert.incidentId)}
+                            className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs cursor-pointer shadow-md transition-all active:scale-95 flex items-center gap-1.5"
+                          >
+                            <span>✓</span>
+                            <span>Acknowledge &amp; Confirm Responders</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleDismissSos(alert.incidentId)}
+                          className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold cursor-pointer border border-slate-700"
+                        >
+                          Archive / Clear
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Console Footer */}
+            <div className="p-4 border-t border-slate-800 bg-slate-950/60 flex items-center justify-between text-xs text-slate-400">
+              <span className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span>Telemetry Connected • OPD Broadcast Mesh Active</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsSosConsoleOpen(false)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold cursor-pointer"
+              >
+                Close Console
+              </button>
+            </div>
           </div>
         </div>
       )}
